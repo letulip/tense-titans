@@ -251,6 +251,14 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .pip { width: 9px; height: 9px; border-radius: 50%; background: rgba(255,255,255,.14); }
 .pip.on { background: var(--accent-2); }
 .verb-row .stagename { font-size: 11px; color: var(--muted); min-width: 60px; text-align: right; }
+/* per-form level bars (past / participle) */
+.lvlbars { margin-top: 7px; display: flex; flex-direction: column; gap: 5px; }
+.lvlrow { display: flex; align-items: center; gap: 8px; }
+.lvllabel { font-size: 10px; color: var(--muted); width: 34px; text-transform: uppercase; letter-spacing: .3px; }
+.lvlbar { flex: 1; height: 7px; background: rgba(255,255,255,.12); border-radius: 99px; overflow: hidden; }
+.lvlbar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius: 99px; transition: width .4s; }
+.lvlnum { font-size: 11px; color: var(--muted); width: 18px; text-align: right; }
+.lvlnum.due { color: var(--star); }
 
 /* ===== Overlays (onboarding + modal) ===== */
 .overlay { position: fixed; inset: 0; background: rgba(6,8,20,.78); backdrop-filter: blur(4px); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 18px; animation: fade .2s ease; }
