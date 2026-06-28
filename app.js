@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.3.1';
+const APP_VERSION = '1.3.2';
 const SCHEMA_VERSION = 3;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -164,7 +164,6 @@ function saveStore() {
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const todayKey = () => new Date().toISOString().slice(0, 10);
-const norm = (s) => s.trim().toLowerCase().replace(/\s+/g, '');
 const levelFromXp = (xp) => 1 + Math.floor(xp / 100);
 const xpIntoLevel = (xp) => xp % 100;
 
@@ -237,8 +236,20 @@ function xpToNextEvo() {
   if (!next) return null;
   return (next - 1) * 100 - store.stats.xp;
 }
-// Accept either alternative for "got/gotten", "was/were", etc.
-function acceptedForms(str) { return str.split('/').map(norm); }
+// Compare answers letters-only, so spacing / slashes / punctuation never matter.
+function lettersOnly(s) { return String(s).toLowerCase().replace(/[^a-z]+/g, ''); }
+// Robust check for answers that may have two valid forms ("was/were", "got/gotten").
+// Accepts: either single form, the whole "was/were" token (Pick option), or both
+// forms typed together in any order / separator ("was were", "were, was", ...).
+function isCorrect(given, answer) {
+  const g = lettersOnly(given);
+  if (!g) return false;
+  const variants = answer.split('/').map(lettersOnly).filter(Boolean);
+  if (variants.includes(g)) return true;
+  const joined = variants.join('');
+  const joinedRev = [...variants].reverse().join('');
+  return g === joined || g === joinedRev;
+}
 
 function toast(msg) {
   const t = $('#toast');
@@ -401,7 +412,7 @@ function handleAnswer(given, el) {
   if (session.answered) return;
   session.answered = true;
   const { v, which, answer } = session.q;
-  const ok = acceptedForms(answer).includes(norm(given));
+  const ok = isCorrect(given, answer);
   const p = prog(v.id);
   const f = p[which];          // the form being tested (past or pp)
   p.lastSeen = Date.now();
@@ -446,7 +457,7 @@ function handleAnswer(given, el) {
   if (session.mode === 'pick') {
     $$('.opt-btn').forEach(b => {
       b.disabled = true;
-      if (acceptedForms(answer).includes(norm(b.textContent))) b.classList.add('correct');
+      if (isCorrect(b.textContent, answer)) b.classList.add('correct');
       else if (b === el && !ok) b.classList.add('wrong');
     });
   }
@@ -572,7 +583,7 @@ function loadVoices() {
 function speak(text) {
   if (!store.settings.sound || !window.speechSynthesis) return;
   try {
-    const u = new SpeechSynthesisUtterance(text.replace('/', ' or '));
+    const u = new SpeechSynthesisUtterance(text.replace(/\//g, ' or '));
     const v = voices.find(v => v.voiceURI === store.settings.voiceURI);
     if (v) u.voice = v;
     u.rate = store.settings.rate || 1;
