@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#6c5ce7" />
+  <title>Tense Titans</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- HOME -->
+    <section class="screen" id="screen-home">
+      <header class="topbar">
+        <div class="brand">⚔️ <span>Tense Titans</span></div>
+        <button class="icon-btn" data-go="settings" title="Settings">⚙️</button>
+      </header>
+
+      <div class="hero">
+        <div class="mascot" id="home-mascot">🐉</div>
+        <div class="greeting">
+          <div class="hello" id="home-hello">Hey, hero!</div>
+          <div class="sub" id="home-sub">Ready for today's quest?</div>
+          <div class="evo-caption" id="home-evo"></div>
+        </div>
+      </div>
+
+      <div class="stat-row">
+        <div class="chip"><span class="chip-ico">🔥</span><b id="home-streak">0</b><small>streak</small></div>
+        <div class="chip"><span class="chip-ico">⭐</span><b id="home-level">1</b><small>level</small></div>
+        <div class="chip"><span class="chip-ico">🌳</span><b id="home-mastered">0</b><small>mastered</small></div>
+      </div>
+
+      <div class="xpbar-wrap">
+        <div class="xpbar"><div class="xpbar-fill" id="home-xpfill"></div></div>
+        <div class="xpbar-label"><span id="home-xptext">0 XP</span><span id="home-xpnext"></span></div>
+      </div>
+
+      <div class="goal-card">
+        <div class="goal-top">
+          <span>Today's goal</span>
+          <span id="home-goaltext">0 / 10</span>
+        </div>
+        <div class="goalbar"><div class="goalbar-fill" id="home-goalfill"></div></div>
+      </div>
+
+      <div class="mode-head">
+        <span>Choose a quest</span>
+        <button class="how-link" id="how-btn">❓ How to play</button>
+      </div>
+      <div class="mode-grid">
+        <button class="mode-card primary" data-mode="pick">
+          <div class="mode-ico">🎯</div><div class="mode-name">Pick the form</div>
+          <div class="mode-desc">Choose the right answer</div>
+        </button>
+        <button class="mode-card" data-mode="type">
+          <span class="mode-badge">🌳 +50% XP</span>
+          <div class="mode-ico">⌨️</div><div class="mode-name">Type it</div>
+          <div class="mode-desc">Master verbs &amp; earn more</div>
+        </button>
+      </div>
+
+      <div class="home-foot">
+        <button class="ghost-btn" data-go="stats">📊 Stats</button>
+        <button class="ghost-btn" data-go="achievements">🏆 Achievements</button>
+      </div>
+    </section>
+
+    <!-- PLAY -->
+    <section class="screen hidden" id="screen-play">
+      <header class="topbar">
+        <button class="icon-btn" id="play-quit" title="Quit">✕</button>
+        <div class="play-progress"><div class="play-progress-fill" id="play-progress-fill"></div></div>
+        <div class="play-count" id="play-count">1/10</div>
+      </header>
+
+      <div class="card-area">
+        <div class="verb-card" id="verb-card">
+          <button class="translate-btn" id="translate-btn" title="Show translation">🇷🇺</button>
+          <div class="triple" id="triple"></div>
+          <div class="translation hidden" id="translation"></div>
+          <button class="speak-btn" id="speak-btn" title="Listen">🔊</button>
+        </div>
+      </div>
+
+      <div class="answer-area" id="answer-area"></div>
+
+      <div class="feedback" id="feedback"></div>
+    </section>
+
+    <!-- RESULTS -->
+    <section class="screen hidden" id="screen-results">
+      <div class="results-card">
+        <div class="results-emoji" id="results-emoji">🎉</div>
+        <h2 id="results-title">Quest complete!</h2>
+        <div class="results-stats">
+          <div><b id="results-correct">0</b><small>correct</small></div>
+          <div><b id="results-accuracy">0%</b><small>accuracy</small></div>
+          <div><b id="results-xp">+0</b><small>XP</small></div>
+        </div>
+        <div class="results-unlocks" id="results-unlocks"></div>
+        <button class="big-btn" data-go="home">Back home</button>
+        <button class="ghost-btn" id="results-again">Play again</button>
+      </div>
+    </section>
+
+    <!-- STATS -->
+    <section class="screen hidden" id="screen-stats">
+      <header class="topbar">
+        <button class="icon-btn" data-go="home">←</button>
+        <div class="brand"><span>📊 Stats</span></div>
+        <span style="width:40px"></span>
+      </header>
+      <div class="stats-summary" id="stats-summary"></div>
+      <h3 class="section-h">Growth stages</h3>
+      <div class="stats-legend" id="stats-legend"></div>
+      <h3 class="section-h">Your verbs</h3>
+      <div class="verb-list" id="verb-list"></div>
+    </section>
+
+    <!-- ACHIEVEMENTS -->
+    <section class="screen hidden" id="screen-achievements">
+      <header class="topbar">
+        <button class="icon-btn" data-go="home">←</button>
+        <div class="brand"><span>🏆 Achievements</span></div>
+        <span style="width:40px"></span>
+      </header>
+      <div class="ach-grid" id="ach-grid"></div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section class="screen hidden" id="screen-settings">
+      <header class="topbar">
+        <button class="icon-btn" data-go="home">←</button>
+        <div class="brand"><span>⚙️ Settings</span></div>
+        <span style="width:40px"></span>
+      </header>
+
+      <div class="settings-body">
+        <h3 class="section-h">Your hero</h3>
+        <label class="field">
+          <span>Name</span>
+          <input type="text" id="set-name" maxlength="16" placeholder="hero" />
+        </label>
+        <label class="field">
+          <span>Mascot</span>
+          <div class="mascot-picker" id="mascot-picker"></div>
+        </label>
+
+        <h3 class="section-h">Look &amp; feel</h3>
+        <label class="field">
+          <span>Theme</span>
+          <div class="theme-picker" id="theme-picker"></div>
+        </label>
+        <label class="field switch-field">
+          <span>Dark mode</span>
+          <input type="checkbox" id="set-dark" class="switch" />
+        </label>
+
+        <h3 class="section-h">Sound &amp; voice</h3>
+        <label class="field switch-field">
+          <span>Sound effects</span>
+          <input type="checkbox" id="set-sound" class="switch" />
+        </label>
+        <label class="field">
+          <span>Voice</span>
+          <select id="set-voice"></select>
+        </label>
+        <label class="field">
+          <span>Voice preset</span>
+          <div class="preset-row" id="preset-row"></div>
+        </label>
+        <label class="field">
+          <span>Speed <small id="rate-val"></small></span>
+          <input type="range" id="set-rate" min="0.5" max="1.5" step="0.1" />
+        </label>
+        <label class="field">
+          <span>Pitch <small id="pitch-val"></small></span>
+          <input type="range" id="set-pitch" min="0.5" max="2" step="0.1" />
+        </label>
+        <button class="ghost-btn" id="test-voice">🔊 Test voice</button>
+
+        <h3 class="section-h">Practice</h3>
+        <label class="field">
+          <span>Daily goal</span>
+          <select id="set-goal">
+            <option value="5">5 verbs</option>
+            <option value="10">10 verbs</option>
+            <option value="15">15 verbs</option>
+            <option value="20">20 verbs</option>
+          </select>
+        </label>
+
+        <h3 class="section-h">Help</h3>
+        <button class="ghost-btn" id="replay-onboarding">↻ Replay intro &amp; tutorial</button>
+
+        <h3 class="section-h">Data</h3>
+        <div class="data-row">
+          <button class="ghost-btn" id="export-btn">⬇️ Export progress</button>
+          <button class="ghost-btn" id="import-btn">⬆️ Import progress</button>
+        </div>
+        <button class="danger-btn" id="reset-btn">Reset all progress</button>
+        <div class="version" id="version-line"></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ONBOARDING -->
+  <div class="overlay hidden" id="onboarding">
+    <div class="onb-card">
+      <button class="onb-skip" id="onb-skip">Skip</button>
+      <div class="onb-body" id="onb-body"></div>
+      <div class="onb-dots" id="onb-dots"></div>
+      <div class="onb-nav">
+        <button class="ghost-btn" id="onb-back">Back</button>
+        <button class="big-btn" id="onb-next">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- INFO MODAL -->
+  <div class="overlay hidden" id="modal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="modal-title">How to play</h3>
+        <button class="icon-btn" id="modal-close">✕</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <div class="toast hidden" id="toast"></div>
+  <input type="file" id="import-file" accept="application/json" hidden />
+
+  <script src="app.js"></script>
+</body>
+</html>
