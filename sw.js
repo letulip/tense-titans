@@ -2,7 +2,7 @@
    IMPORTANT: bump CACHE on every release so updated files reach the device.
    This only manages the code cache; it never touches localStorage (progress
    lives there and survives every update). */
-const CACHE = 'tensetitans-v1.2.0';
+const CACHE = 'tensetitans-v1.3.1';
 const ASSETS = [
   './',
   './index.html',
@@ -10,6 +10,8 @@ const ASSETS = [
   './app.js',
   './verbs.json',
   './manifest.json',
+  './icons/logo.svg',
+  './icons/favicon-32.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-maskable-512.png',

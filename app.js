@@ -4,20 +4,28 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.2.0';
-const SCHEMA_VERSION = 2;        // bump + add a migration when store shape changes
+const APP_VERSION = '1.3.1';
+const SCHEMA_VERSION = 3;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
-const MAX_BOX = 5;               // Leitner boxes 0..5 ; 5 = mastered
-const PICK_CAP = 4;              // "Pick the form" can grow a verb only up to box 4 (Growing)
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
 
-/* Mastery stages by Leitner box (clear, named, with how-to). */
+/* ---- Spaced-repetition progression (per form: past & participle) ---- */
+const DAY = 86400000;
+const FORM_MAX = 10;             // top per-form level
+const PICK_FORM_CAP = 3;         // "Pick" (recognition) can raise a form only to level 3
+const SCHEDULE_GATE = 3;         // at level >= this, a form advances only when it's "due"
+// Days to wait after REACHING a level before the form is due to advance again (index = level).
+// Fibonacci-flavoured, tuned so: Growing(5)≈3–5d, Mastered(7)≈7–10d, Champion(10)≈3 weeks.
+const INTERVAL_DAYS = [0, 0, 0, 1, 2, 3, 3, 4, 5, 6, 0];
+// Stage thresholds by the WEAKER of the two forms (min level) — you must know BOTH.
+const STAGE_MIN = { sprout: 3, growing: 5, mastered: 7, gold: 10 };
 const STAGES = [
-  { emoji: '⚪', name: 'New',      hint: 'Not started yet' },               // never seen
-  { emoji: '🌱', name: 'Seedling', hint: 'Just learning — keep going!' },    // box 0–1
-  { emoji: '🌿', name: 'Sprout',   hint: 'Getting it — answer right to grow' }, // box 2–3
-  { emoji: '🪴', name: 'Growing',  hint: 'Almost there! Master it in ⌨️ Type it' }, // box 4
-  { emoji: '🌳', name: 'Mastered', hint: 'Fully learned 🎉' },              // box 5
+  { key: 'new',      emoji: '⚪', name: 'New',      hint: 'Not started yet' },
+  { key: 'seedling', emoji: '🌱', name: 'Seedling', hint: 'Just started — keep answering' },
+  { key: 'sprout',   emoji: '🌿', name: 'Sprout',   hint: 'Both forms recognised (lvl 3+)' },
+  { key: 'growing',  emoji: '🪴', name: 'Growing',  hint: 'Both lvl 5+ — review over a few days' },
+  { key: 'mastered', emoji: '🌳', name: 'Mastered', hint: 'Both lvl 7+ via ⌨️ Type it (~1 week+)' },
+  { key: 'gold',     emoji: '🌟', name: 'Champion', hint: 'Both lvl 10 — kept perfect for weeks' },
 ];
 const EVO_LEVELS = [2, 5, 9];    // mascot evolves when you reach these levels
 const EVO_NAMES = ['Egg', 'Baby', 'Grown', 'Champion'];
@@ -68,7 +76,7 @@ let session = null;
 function defaultStore() {
   return {
     schemaVersion: SCHEMA_VERSION,
-    progress: {},          // verbId -> {box, correct, wrong, lastSeen}
+    progress: {},          // verbId -> { past:{lvl,due,peak,correct,wrong}, pp:{...}, lastSeen }
     stats: {
       xp: 0, dayStreak: 0, bestStreak: 0, lastStudyDate: null,
       totalAnswers: 0, totalCorrect: 0, history: {},
@@ -103,6 +111,23 @@ function migrate(s) {
     s.flags = s.flags || {};
     const hasProgress = s.progress && Object.keys(s.progress).length > 0;
     if (s.flags.onboarded === undefined) s.flags.onboarded = hasProgress;
+  }
+  // v2 -> v3: single Leitner `box` (0–5) becomes per-form levels (past + participle, 0–10)
+  // with spaced-repetition scheduling. Map old box to a roughly equivalent level on both forms.
+  if ((s.schemaVersion || 1) < 3 && s.progress) {
+    const boxToLvl = { 0: 0, 1: 2, 2: 3, 3: 4, 4: 5, 5: 7 };
+    const now = Date.now();
+    for (const id in s.progress) {
+      const old = s.progress[id];
+      if (old && old.box !== undefined && !old.past) {
+        const lvl = boxToLvl[Math.min(old.box, 5)] ?? 0;
+        s.progress[id] = {
+          past: { lvl, due: now, peak: lvl, correct: old.correct || 0, wrong: old.wrong || 0 },
+          pp:   { lvl, due: now, peak: lvl, correct: 0, wrong: 0 },
+          lastSeen: old.lastSeen || 0,
+        };
+      }
+    }
   }
   // Always fill any newly-added default fields without dropping the player's data.
   s = fillDefaults(s, defaultStore());
@@ -143,25 +168,57 @@ const norm = (s) => s.trim().toLowerCase().replace(/\s+/g, '');
 const levelFromXp = (xp) => 1 + Math.floor(xp / 100);
 const xpIntoLevel = (xp) => xp % 100;
 
+function newForm() { return { lvl: 0, due: 0, peak: 0, correct: 0, wrong: 0 }; }
 function prog(id) {
-  if (!store.progress[id]) store.progress[id] = { box: 0, correct: 0, wrong: 0, lastSeen: 0 };
+  if (!store.progress[id]) store.progress[id] = { past: newForm(), pp: newForm(), lastSeen: 0 };
   return store.progress[id];
 }
 function isSeen(id) { return !!store.progress[id]; }
+function minLvl(p) { return Math.min(p.past.lvl, p.pp.lvl); }
 function masteredCount() {
-  return VERBS.filter(v => store.progress[v.id] && store.progress[v.id].box >= MAX_BOX).length;
+  return VERBS.filter(v => { const p = store.progress[v.id]; return p && minLvl(p) >= STAGE_MIN.mastered; }).length;
 }
-// Map a verb to one of the 5 named mastery stages.
+// Map a verb to one of the named mastery stages, by the WEAKER of its two forms.
 function stageOf(id) {
   const p = store.progress[id];
-  if (!p) return { idx: 0, box: -1, ...STAGES[0] };
-  const b = p.box;
+  if (!p) return { idx: 0, m: -1, ...STAGES[0] };
+  const m = minLvl(p);
   let idx;
-  if (b >= MAX_BOX) idx = 4;
-  else if (b >= PICK_CAP) idx = 3;
-  else if (b >= 2) idx = 2;
-  else idx = 1;
-  return { idx, box: b, ...STAGES[idx] };
+  if (m >= STAGE_MIN.gold) idx = 5;
+  else if (m >= STAGE_MIN.mastered) idx = 4;
+  else if (m >= STAGE_MIN.growing) idx = 3;
+  else if (m >= STAGE_MIN.sprout) idx = 2;
+  else idx = 1; // answered at least once
+  return { idx, m, ...STAGES[idx] };
+}
+
+// ---- Forgetting curve: overdue forms slip levels (recover 2x faster via peak) ----
+function graceDays(lvl) { return Math.max(2, 2 * (INTERVAL_DAYS[lvl] || 0)); }
+function decayForm(f) {
+  let guard = 0;
+  while (f.lvl > 0 && f.due && Date.now() > f.due + graceDays(f.lvl) * DAY && guard++ < 30) {
+    f.due += graceDays(f.lvl) * DAY;   // consume one grace window
+    f.lvl -= 1;                        // ...and slip a level (peak is kept → fast relearn)
+  }
+}
+function decayAll() {
+  for (const id in store.progress) {
+    const p = store.progress[id];
+    if (p && p.past) { decayForm(p.past); decayForm(p.pp); }
+  }
+}
+// Is a form ready to advance right now? (low levels are instant; high levels are scheduled)
+function formDue(f) { return f.lvl < SCHEDULE_GATE || Date.now() >= (f.due || 0); }
+// How many seen verbs have a form due for review right now.
+function dueCount() {
+  let n = 0;
+  for (const v of VERBS) {
+    const p = store.progress[v.id];
+    if (!p) continue;
+    const due = (f) => f.lvl > 0 && f.lvl >= SCHEDULE_GATE && Date.now() >= (f.due || 0);
+    if (due(p.past) || due(p.pp)) n++;
+  }
+  return n;
 }
 
 // ---- Mascot evolution (Tamagotchi-style, driven by level) ----
@@ -208,7 +265,6 @@ function show(screen) {
    Spaced-repetition selection (Leitner-flavoured)
    ============================================================ */
 function pickVerb(excludeId, newBudgetRef) {
-  const now = Date.now();
   const pool = [];
   for (const v of VERBS) {
     if (v.id === excludeId) continue;
@@ -217,10 +273,11 @@ function pickVerb(excludeId, newBudgetRef) {
     if (!p) {
       weight = newBudgetRef.left > 0 ? 8 : 0.2;   // gate how many new verbs appear
     } else {
-      weight = (MAX_BOX + 1 - p.box);             // lower box -> higher priority
-      const days = (now - (p.lastSeen || 0)) / 86400000;
-      weight *= 1 + Math.min(days, 5) / 5;        // overdue boost
-      if (p.box >= MAX_BOX) weight *= 0.25;       // mastered shows rarely
+      const m = minLvl(p);
+      weight = (FORM_MAX + 1 - m);                // weaker verbs -> higher priority
+      if (formDue(p.past) || formDue(p.pp)) weight *= 2.2;   // due for review -> surface it
+      else weight *= 0.3;                                    // not due -> show rarely
+      if (m >= STAGE_MIN.mastered) weight *= 0.6;            // mastered shows less (unless due)
     }
     if (weight > 0) pool.push({ v, weight });
   }
@@ -232,6 +289,16 @@ function pickVerb(excludeId, newBudgetRef) {
     return item.v;
   } }
   return pool[pool.length - 1].v;
+}
+
+// Test the form that needs work most: prefer a due form, then the lower level.
+function chooseForm(v) {
+  const p = store.progress[v.id];
+  if (!p) return Math.random() < 0.5 ? 'past' : 'pp';
+  const need = (f) => (formDue(f) ? 100 : 0) + (FORM_MAX - f.lvl);
+  const np = need(p.past), npp = need(p.pp);
+  if (np === npp) return Math.random() < 0.5 ? 'past' : 'pp';
+  return np > npp ? 'past' : 'pp';
 }
 
 /* ============================================================
@@ -250,8 +317,7 @@ function nextQuestion() {
   session.answered = false;
   const v = pickVerb(session.lastId, session.newBudget);
   session.lastId = v.id;
-  // pick which form to test: 'past' or 'pp'
-  const which = Math.random() < 0.5 ? 'past' : 'pp';
+  const which = chooseForm(v);   // test the form that needs it most
   session.q = { v, which, answer: v[which] };
   renderQuestion();
 }
@@ -337,25 +403,37 @@ function handleAnswer(given, el) {
   const { v, which, answer } = session.q;
   const ok = acceptedForms(answer).includes(norm(given));
   const p = prog(v.id);
+  const f = p[which];          // the form being tested (past or pp)
   p.lastSeen = Date.now();
   store.stats.totalAnswers++;
 
   if (ok) {
-    // Only Type it can push a verb to full mastery (box 5). Pick caps at box 4.
-    const cap = session.mode === 'type' ? MAX_BOX : PICK_CAP;
-    const before = p.box;
-    p.box = Math.min(cap, p.box + 1);
-    p.correct++;
+    f.correct++;
     session.correct++;
     store.stats.totalCorrect++;
     store.stats.xp += session.mode === 'type' ? 15 : 10;   // Type it = +50% XP
-    const cappedHint = session.mode === 'pick' && before >= PICK_CAP;
-    feedbackGood(el, answer, cappedHint ? 'Master it in ⌨️ Type it!' : '');
+    const modeCap = session.mode === 'type' ? FORM_MAX : PICK_FORM_CAP;
+    let hint = '';
+    if (f.lvl >= modeCap) {
+      hint = session.mode === 'pick' ? 'Switch to ⌨️ Type it to level up!' : '';
+    } else if (f.lvl >= SCHEDULE_GATE && Date.now() < (f.due || 0)) {
+      hint = 'Counts! Comes back for review later ⏳';   // scheduled — no level yet
+    } else {
+      f.lvl++;
+      f.peak = Math.max(f.peak, f.lvl);
+      let wait = INTERVAL_DAYS[f.lvl] || 0;
+      if (f.lvl < f.peak) wait = Math.ceil(wait / 2);     // relearn 2x faster
+      f.due = Date.now() + wait * DAY;
+      if (minLvl(p) === STAGE_MIN.mastered) hint = '🌳 Mastered!';
+      else if (minLvl(p) === STAGE_MIN.gold) hint = '🌟 Champion verb!';
+    }
+    feedbackGood(el, answer, hint);
     sfx(true);
     speak(answer);
   } else {
-    p.box = 0;                  // back to the start for a missed verb
-    p.wrong++;
+    f.wrong++;
+    f.lvl = Math.max(0, f.lvl - 2);   // a miss costs two levels on that form...
+    f.due = Date.now();               // ...and it's due to relearn right away
     feedbackBad(el, answer);
     sfx(false);
   }
@@ -534,6 +612,7 @@ function applyCosmetics() {
 
 function renderHome() {
   applyCosmetics();
+  decayAll();
   const s = store.settings, st = store.stats;
   const stage = currentEvoStage();
   const mEl = $('#home-mascot');
@@ -559,6 +638,8 @@ function renderHome() {
 function homeMood() {
   const st = store.stats, goal = store.settings.dailyGoal || 10;
   const doneToday = st.history[todayKey()] || 0;
+  const due = dueCount();
+  if (due > 0) return `🔔 ${due} verb${due > 1 ? 's' : ''} due for review!`;
   if (doneToday >= goal) return pickFrom(["Goal smashed today! 🎉", "You did it today — bonus round? 💪"]);
   if (doneToday > 0) return `${goal - doneToday} more to hit today's goal!`;
   if (st.dayStreak >= 2) return `Day ${st.dayStreak} streak — don't break it! 🔥`;
@@ -573,33 +654,39 @@ function evoCaption() {
 
 function renderStats() {
   const st = store.stats;
-  const learning = VERBS.filter(v => { const p = store.progress[v.id]; return p && p.box >= 1 && p.box < MAX_BOX; }).length;
+  decayAll();
+  const inProgress = VERBS.filter(v => { const p = store.progress[v.id]; return p && minLvl(p) >= STAGE_MIN.sprout && minLvl(p) < STAGE_MIN.mastered; }).length;
   const acc = st.totalAnswers ? Math.round(st.totalCorrect / st.totalAnswers * 100) : 0;
+  const due = dueCount();
   $('#stats-summary').innerHTML = `
     <div class="box"><b>${masteredCount()}</b><small>mastered 🌳</small></div>
-    <div class="box"><b>${learning}</b><small>learning 🌿</small></div>
+    <div class="box"><b>${inProgress}</b><small>growing 🌿</small></div>
     <div class="box"><b>${acc}%</b><small>accuracy</small></div>
-    <div class="box"><b>${st.bestStreak}</b><small>best streak 🔥</small></div>`;
+    <div class="box"><b>${due}</b><small>due now 🔔</small></div>`;
 
   // Legend: explain the stages and how to advance.
   $('#stats-legend').innerHTML = STAGES.map(s =>
     `<div class="legend-item"><span class="lg-emoji">${s.emoji}</span><span class="lg-text"><b>${s.name}</b> — ${s.hint}</span></div>`
   ).join('');
 
+  const lvlBar = (f, label) => {
+    const dueNow = f.lvl >= SCHEDULE_GATE && Date.now() >= (f.due || 0);
+    return `<div class="lvlrow"><span class="lvllabel">${label}</span>
+      <div class="lvlbar"><div class="lvlbar-fill" style="width:${f.lvl / FORM_MAX * 100}%"></div></div>
+      <span class="lvlnum${dueNow ? ' due' : ''}">${dueNow ? '🔔' : f.lvl}</span></div>`;
+  };
+
   const list = $('#verb-list');
   list.innerHTML = '';
-  const sorted = [...VERBS].sort((a, b) => (store.progress[b.id]?.box ?? -1) - (store.progress[a.id]?.box ?? -1));
+  const sorted = [...VERBS].sort((a, b) => (store.progress[b.id] ? minLvl(store.progress[b.id]) : -1) - (store.progress[a.id] ? minLvl(store.progress[a.id]) : -1));
   for (const v of sorted) {
     const p = store.progress[v.id];
     const stg = stageOf(v.id);
-    const filled = Math.max(0, stg.box);
-    let pips = '';
-    for (let i = 0; i < MAX_BOX; i++) pips += `<span class="pip${i < filled ? ' on' : ''}"></span>`;
     const row = document.createElement('div');
     row.className = 'verb-row';
+    const bars = p ? `<div class="lvlbars">${lvlBar(p.past, 'past')}${lvlBar(p.pp, 'p.p.')}</div>` : '';
     row.innerHTML = `<div class="stage" title="${stg.name}">${stg.emoji}</div>
-      <div class="forms"><span class="b">${v.base}</span> · <span class="f">${v.past} · ${v.pp}</span>
-        <div class="pips">${pips}</div></div>
+      <div class="forms"><span class="b">${v.base}</span> · <span class="f">${v.past} · ${v.pp}</span>${bars}</div>
       <div class="stagename">${stg.name}</div>`;
     list.appendChild(row);
   }
@@ -693,12 +780,12 @@ function howToPlayHTML() {
         <b>Pick the form</b><br><small>Choose the right answer from 4. Great for learning new verbs.</small></div></div>
       <div class="how-row"><div class="how-ico">⌨️</div><div>
         <b>Type it</b> <span class="xp-badge">+50% XP</span><br>
-        <small>Spell the form yourself. <b>Only Type it can fully master a verb 🌳</b> — and it pays more XP!</small></div></div>
+        <small>Spell the form yourself. <b>Only Type it can grow a verb past level 3</b> — needed for 🌳 — and it pays more XP!</small></div></div>
       <hr>
       <div class="how-stages">
         ${STAGES.map(s => `<div class="how-stage"><span>${s.emoji}</span> <b>${s.name}</b><small>${s.hint}</small></div>`).join('')}
       </div>
-      <p class="how-foot">Answer correctly to grow a verb. Miss it and it drops back — so come back often! 🔁</p>
+      <p class="how-foot">Each verb has <b>two forms</b> (past &amp; participle) — you must know <b>both</b>. The top levels unlock only on <b>scheduled reviews</b> over days, and a miss drops you back. Come back when verbs are 🔔 due!</p>
     </div>`;
 }
 function openModal(title, html) {
@@ -907,6 +994,8 @@ async function boot() {
     return;
   }
   VERBS.forEach(v => verbById[v.id] = v);
+  decayAll();           // apply the forgetting curve for any time away
+  saveStore();
   applyCosmetics();
   wire();
   show('home');
