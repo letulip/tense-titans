@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.7.1';
 const SCHEMA_VERSION = 5;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -92,6 +92,7 @@ let verbById = {};
 let store = null;
 let voices = [];
 let session = null;
+let evoAnimPending = false;   // play the evolution pop on the next home render
 
 /* ============================================================
    Store: load / migrate / save  (backward compatible)
@@ -651,7 +652,7 @@ function collectRewards() {
   checkAchievements();
   const newEvo = currentEvoStage();
   let evolved = null;
-  if (newEvo > (store.flags.evoStage || 0)) { evolved = newEvo; store.flags.evoStage = newEvo; }
+  if (newEvo > (store.flags.evoStage || 0)) { evolved = newEvo; store.flags.evoStage = newEvo; evoAnimPending = true; }
   return { unlocks, evolved };
 }
 
@@ -919,10 +920,17 @@ function renderHome() {
   const s = store.settings, st = store.stats;
   const stage = currentEvoStage();
   const mEl = $('#home-mascot');
+  const src = mascotImg(stage);
   mEl.className = 'mascot-banner';
-  mEl.innerHTML = `<img class="mascot-img" src="${mascotImg(stage)}" alt="${mascotDef().name}" />`;
+  mEl.innerHTML = `<img class="mascot-img" src="${src}" alt="${mascotDef().name}" />`;
   // graceful fallback to the emoji if the artwork can't load (e.g. offline & uncached)
   mEl.firstChild.onerror = () => { mEl.classList.add('emoji-fallback'); mEl.textContent = mascotDef().emoji; };
+  mEl.onclick = () => openLightbox(src, `${mascotDef().name} · ${EVO_NAMES[stage]}`);
+  if (evoAnimPending && !reduceMotion()) {   // just evolved -> pop the new artwork in
+    evoAnimPending = false;
+    void mEl.offsetWidth; mEl.classList.add('evolve-in');
+    setTimeout(() => mEl.classList.remove('evolve-in'), 800);
+  }
   $('#home-hello').textContent = s.name ? `Hey, ${s.name}!` : 'Hey, hero!';
   $('#home-sub').textContent = homeMood();
   $('#home-evo').textContent = evoCaption();
@@ -1158,6 +1166,13 @@ function openModal(title, html) {
 }
 function closeModal() { $('#modal').classList.add('hidden'); }
 
+function openLightbox(src, caption) {
+  $('#lightbox-img').src = src;
+  $('#lightbox').querySelector('.lb-cap').textContent = caption || 'tap to close';
+  $('#lightbox').classList.remove('hidden');
+}
+function closeLightbox() { $('#lightbox').classList.add('hidden'); $('#lightbox-img').src = ''; }
+
 /* ============================================================
    Onboarding (first launch)
    ============================================================ */
@@ -1192,7 +1207,7 @@ function onbSteps() {
       html: `<div class="onb-mascot">${adult(mascotById(onb.mascot))}</div>
         <h2>What's your name?</h2>
         <p>So your buddy knows who the hero is.</p>
-        <input id="onb-name" class="onb-input" type="text" maxlength="16" placeholder="hero" value="${escapeAttr(onb.name)}">`,
+        <input id="onb-name" class="onb-input" type="text" maxlength="12" placeholder="hero" value="${escapeAttr(onb.name)}">`,
       next: 'Next',
     },
     { // voice
@@ -1319,6 +1334,7 @@ function wire() {
   $('#trouble-practice').onclick = () => { const q = troubleList().map(v => ({ v })); if (q.length) startSession('trouble', q); };
   $('#modal-close').onclick = closeModal;
   $('#modal').onclick = (e) => { if (e.target.id === 'modal') closeModal(); };
+  $('#lightbox').onclick = closeLightbox;
 
   if (window.speechSynthesis) {
     loadVoices();
