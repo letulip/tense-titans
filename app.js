@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.5.1';
+const APP_VERSION = '1.5.2';
 const SCHEMA_VERSION = 4;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -785,6 +785,20 @@ function speak(text) {
     speechSynthesis.speak(u);
   } catch (e) { /* ignore */ }
 }
+// Speak a short sample with the CURRENT voice/rate/pitch (so settings give feedback).
+let voicePreviewTimer = null;
+function previewVoice(delay = 0) {
+  clearTimeout(voicePreviewTimer);
+  voicePreviewTimer = setTimeout(() => speak('Go, went, gone'), delay);
+}
+// Highlight the preset whose rate+pitch matches the current settings (if any).
+function markActivePreset() {
+  $$('#preset-row .preset-opt').forEach(b => {
+    const p = VOICE_PRESETS.find(x => x.id === b.dataset.preset);
+    b.classList.toggle('active', !!p && store.settings.rate === p.rate && store.settings.pitch === p.pitch);
+  });
+}
+
 // tiny WebAudio note sequences so we don't ship sound files
 let audioCtx = null;
 const SFX = {
@@ -1031,11 +1045,12 @@ function renderSettings() {
   const pr = $('#preset-row'); pr.innerHTML = '';
   VOICE_PRESETS.forEach(p => {
     const b = document.createElement('button');
-    b.className = 'preset-opt';
+    b.className = 'preset-opt' + (s.rate === p.rate && s.pitch === p.pitch ? ' active' : '');
+    b.dataset.preset = p.id;
     b.textContent = p.name;
     b.onclick = () => {
       s.rate = p.rate; s.pitch = p.pitch; saveStore(); renderSettings();
-      speak('I sound like this');
+      previewVoice();
     };
     pr.appendChild(b);
   });
@@ -1225,10 +1240,10 @@ function wire() {
   $('#set-dark').onchange = (e) => { store.settings.dark = e.target.checked; applyCosmetics(); saveStore(); };
   $('#set-reduce').onchange = (e) => { store.settings.reduceEffects = e.target.checked; applyCosmetics(); saveStore(); };
   $('#set-sound').onchange = (e) => { store.settings.sound = e.target.checked; saveStore(); };
-  $('#set-rate').oninput = (e) => { store.settings.rate = +e.target.value; $('#rate-val').textContent = '×' + e.target.value; saveStore(); };
-  $('#set-pitch').oninput = (e) => { store.settings.pitch = +e.target.value; $('#pitch-val').textContent = '×' + e.target.value; saveStore(); };
+  $('#set-rate').oninput = (e) => { store.settings.rate = +e.target.value; $('#rate-val').textContent = '×' + e.target.value; saveStore(); markActivePreset(); previewVoice(450); };
+  $('#set-pitch').oninput = (e) => { store.settings.pitch = +e.target.value; $('#pitch-val').textContent = '×' + e.target.value; saveStore(); markActivePreset(); previewVoice(450); };
   $('#set-goal').onchange = (e) => { store.settings.dailyGoal = +e.target.value; saveStore(); };
-  $('#set-voice').onchange = (e) => { store.settings.voiceURI = e.target.value; saveStore(); };
+  $('#set-voice').onchange = (e) => { store.settings.voiceURI = e.target.value; saveStore(); previewVoice(); };
   $('#test-voice').onclick = () => speak('Hello! Go, went, gone.');
 
   $('#reset-btn').onclick = () => {
