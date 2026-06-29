@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.8.2';
+const APP_VERSION = '1.8.3';
 const SCHEMA_VERSION = 6;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -498,12 +498,26 @@ function renderQuestion() {
   else buildOptions(area);              // pick, speed, trouble -> multiple choice
 }
 
+// A naive over-regularized form (cut -> cuted) — a realistic learner mistake. Kept naive (no
+// consonant doubling) on purpose, so it can't accidentally match a real form like "quitted"/"wedded".
+function regularize(base) {
+  if (/[^aeiou]y$/i.test(base)) return base.slice(0, -1) + 'ied';
+  if (/e$/i.test(base)) return base + 'd';
+  return base + 'ed';
+}
+
 function buildOptions(area) {
   const { v, which, answer } = session.q;
   const opts = new Set([answer]);
   // Sneaky trap: the verb's OTHER form (past<->participle), e.g. "gone" when asked for "went".
   const otherForm = which === 'past' ? v.pp : v.past;
-  if (otherForm && !isCorrect(otherForm, answer)) opts.add(otherForm);
+  if (otherForm && !isCorrect(otherForm, answer)) {
+    opts.add(otherForm);
+  } else if (v.base === answer) {
+    // never-changing verb (cut/put/read): trap with the wrong "-ed" form (cuted, puted...)
+    const reg = regularize(v.base);
+    if (reg && !isCorrect(reg, answer)) opts.add(reg);
+  }
   // Fill the rest with same-type forms from other verbs.
   const others = VERBS.filter(x => x.id !== v.id).map(x => x[which]);
   while (opts.size < 4 && others.length) opts.add(others[Math.floor(Math.random() * others.length)]);
