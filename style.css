@@ -264,8 +264,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 /* ===== Overlays (onboarding + modal) ===== */
 .overlay { position: fixed; inset: 0; background: rgba(6,8,20,.78); backdrop-filter: blur(4px); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 18px; animation: fade .2s ease; }
 .onb-card, .modal-card { width: 100%; max-width: 460px; background: linear-gradient(165deg, var(--bg-top), var(--bg-bot)); border: 1px solid var(--border); border-radius: 22px; box-shadow: var(--shadow); padding: 24px 20px; position: relative; max-height: 90vh; overflow-y: auto; }
-.onb-skip { position: absolute; top: 14px; right: 16px; background: none; border: none; color: var(--muted); font-size: 14px; cursor: pointer; }
-.onb-body { text-align: center; min-height: 240px; }
+.onb-skip { position: absolute; top: 14px; right: 16px; z-index: 2; background: none; border: none; color: var(--muted); font-size: 14px; cursor: pointer; padding: 4px 6px; }
+.onb-body { text-align: center; min-height: 240px; margin-top: 18px; }
 .onb-body h2 { margin: 10px 0 6px; }
 .onb-body p { color: var(--muted); margin: 0 0 16px; }
 .onb-mascot { font-size: 66px; animation: bob 3s ease-in-out infinite; }
