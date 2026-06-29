@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.8.6';
+const APP_VERSION = '1.8.7';
 const SCHEMA_VERSION = 6;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -216,11 +216,9 @@ const levelFromXp = (xp) => { let L = 1; while (xpForLevel(L + 1) <= xp) L++; re
 const xpIntoLevel = (xp) => xp - xpForLevel(levelFromXp(xp));            // XP within the current level
 const xpForNextLevel = (xp) => { const L = levelFromXp(xp); return xpForLevel(L + 1) - xpForLevel(L); }; // span of current level
 // Rank titles by level (cosmetic motivator).
-const RANKS = [
-  { min: 1, name: 'Novice' }, { min: 2, name: 'Apprentice' }, { min: 3, name: 'Squire' },
-  { min: 4, name: 'Knight' }, { min: 6, name: 'Champion' }, { min: 8, name: 'Titan' },
-];
-function rankTitle(level) { let t = RANKS[0].name; for (const r of RANKS) if (level >= r.min) t = r.name; return t; }
+// One rank per evolution stage — rank advances on the same level milestones as the mascot (Lv 1/3/5/7/9/11).
+const RANKS = ['Novice', 'Apprentice', 'Squire', 'Knight', 'Champion', 'Titan'];
+function rankTitle(level) { return RANKS[evoStageForLevel(level)]; }
 
 function newForm() { return { lvl: 0, due: 0, peak: 0, correct: 0, wrong: 0 }; }
 function prog(id) {
