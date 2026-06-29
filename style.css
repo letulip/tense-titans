@@ -298,6 +298,12 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .how-foot { color: var(--muted); font-size: 13px; margin-top: 14px; }
 .unlock-pill.evo { background: rgba(108,92,231,.18); border-color: var(--accent-2); color: var(--accent-2); }
 
+/* ===== Phase 3: trouble spots ===== */
+.trouble-section { margin-bottom: 10px; }
+.trouble-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.trouble-chip { background: rgba(255,107,107,.14); border: 1px solid var(--bad); color: var(--text); border-radius: 99px; padding: 6px 12px; font-weight: 600; font-size: 14px; }
+.trouble-section .big-btn { background: linear-gradient(160deg, var(--bad), #ff9a8b); }
+
 /* ===== Phase 3: review banner ===== */
 .review-banner {
   width: 100%; display: flex; align-items: center; gap: 12px; cursor: pointer;

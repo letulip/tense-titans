@@ -259,6 +259,22 @@ function buildReviewQueue() {
   return shuffle(q);
 }
 
+// "Trouble spots": verbs you keep missing (weighted by wrongs, low accuracy, low level).
+function troubleScore(v) {
+  const p = store.progress[v.id];
+  if (!p) return 0;
+  const wrongs = p.past.wrong + p.pp.wrong;
+  if (wrongs === 0) return 0;
+  const total = wrongs + p.past.correct + p.pp.correct;
+  const acc = total ? (p.past.correct + p.pp.correct) / total : 1;
+  return wrongs * 2 + (1 - acc) * 10 + (FORM_MAX - minLvl(p)) * 0.5;
+}
+function troubleList(n = 10) {
+  return VERBS.filter(v => troubleScore(v) > 0)
+    .sort((a, b) => troubleScore(b) - troubleScore(a))
+    .slice(0, n);
+}
+
 // ---- Mascot evolution (Tamagotchi-style, driven by level) ----
 function evoStageForLevel(level) {
   let stage = 0;
@@ -894,6 +910,13 @@ function renderStats() {
     `<div class="legend-item"><span class="lg-emoji">${s.emoji}</span><span class="lg-text"><b>${s.name}</b> — ${s.hint}</span></div>`
   ).join('');
 
+  // Trouble spots: the verbs you keep missing.
+  const trouble = troubleList();
+  $('#trouble-section').classList.toggle('hidden', trouble.length === 0);
+  if (trouble.length) {
+    $('#trouble-list').innerHTML = trouble.map(v => `<span class="trouble-chip">${v.base}</span>`).join('');
+  }
+
   const lvlBar = (f, label) => {
     const dueNow = f.lvl >= SCHEDULE_GATE && Date.now() >= (f.due || 0);
     return `<div class="lvlrow"><span class="lvllabel">${label}</span>
@@ -1186,6 +1209,7 @@ function wire() {
   $('#onb-back').onclick = onbBack;
   $('#onb-skip').onclick = finishOnboarding;
   $('#how-btn').onclick = () => openModal('How to play', howToPlayHTML());
+  $('#trouble-practice').onclick = () => { const q = troubleList().map(v => ({ v })); if (q.length) startSession('trouble', q); };
   $('#modal-close').onclick = closeModal;
   $('#modal').onclick = (e) => { if (e.target.id === 'modal') closeModal(); };
 
