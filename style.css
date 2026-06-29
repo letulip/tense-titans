@@ -369,6 +369,19 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .review-banner .rb-go { font-weight: 800; background: rgba(255,255,255,.22); padding: 6px 12px; border-radius: 99px; font-size: 14px; }
 .review-caughtup { text-align: center; color: var(--muted); font-size: 14px; margin-bottom: 16px; }
 
+/* trouble-spots banner at the very bottom of home */
+.trouble-banner {
+  width: 100%; display: flex; align-items: center; gap: 12px; cursor: pointer;
+  background: linear-gradient(160deg, var(--bad), #ff9a8b); border: none; color: #fff;
+  border-radius: var(--radius); padding: 14px 16px; margin-top: 18px; box-shadow: var(--shadow);
+}
+.trouble-banner:active { transform: scale(.98); }
+.trouble-banner .tb-ico { font-size: 24px; }
+.trouble-banner .tb-text { flex: 1; text-align: left; font-weight: 600; }
+.trouble-banner .tb-text b { font-size: 20px; }
+.trouble-banner .tb-text small { opacity: .9; font-weight: 700; margin-left: 4px; white-space: nowrap; }
+.trouble-banner .tb-go { font-weight: 800; background: rgba(255,255,255,.22); padding: 6px 12px; border-radius: 99px; font-size: 14px; white-space: nowrap; }
+
 /* ===== Phase 2: fun modes ===== */
 .mode-card.fun { background: var(--surface-2); }
 .mode-badge.speed { background: #ff7b54; color: #2a1000; }

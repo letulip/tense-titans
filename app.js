@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.8.1';
 const SCHEMA_VERSION = 6;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -303,6 +303,7 @@ function troubleList(n = 10) {
     .sort((a, b) => troubleScore(b) - troubleScore(a))
     .slice(0, n);
 }
+function troubleCount() { return VERBS.filter(v => troubleScore(v) > 0).length; }
 
 // ---- Mascot evolution (Tamagotchi-style, driven by level) ----
 function evoStageForLevel(level) {
@@ -566,7 +567,7 @@ function handleAnswer(given, el) {
     if (ok) {
       f.correct++;
       if (recall) store.stats.typeCorrect++;
-      addXp(recall ? 15 : 10);
+      addXp(recall || session.mode === 'trouble' ? 15 : 10);   // fixing mistakes pays a bonus
       const modeCap = recall ? FORM_MAX : PICK_FORM_CAP;
       if (f.lvl >= modeCap) {
         hint = !recall ? 'Switch to ⌨️ Type it to level up!' : '';
@@ -601,11 +602,11 @@ function handleAnswer(given, el) {
     sfx(session.mode === 'speed' && session.combo >= 3 ? 'combo' : 'good');
     confettiBurst(session.combo >= 5 ? 22 : 12);
     if (session.mode === 'speed' && session.combo >= 3) showCombo(session.combo);
-    speak(q.kind === 'translate' ? q.v.base : answer);
   } else {
     feedbackBad(el, answer);
     sfx('bad');
   }
+  speak(q.kind === 'translate' ? q.v.base : answer);   // always voice the correct answer, even on a miss
 
   const blank = $('#blank');
   if (blank) { blank.textContent = answer; blank.classList.add('filled'); if (!ok) blank.classList.add('wrong'); }
@@ -978,6 +979,10 @@ function renderHome() {
   banner.classList.toggle('hidden', due === 0);
   $('#review-caughtup').classList.toggle('hidden', due > 0);
   if (due > 0) $('#review-count').textContent = due;
+  // Trouble-spots banner at the bottom: the verbs being missed most
+  const tc = troubleCount();
+  $('#trouble-banner').classList.toggle('hidden', tc === 0);
+  if (tc > 0) $('#trouble-count').textContent = tc;
 }
 
 // Mascot speech bubble — reacts to streak / daily goal.
@@ -1358,7 +1363,9 @@ function wire() {
   $('#onb-back').onclick = onbBack;
   $('#onb-skip').onclick = finishOnboarding;
   $('#how-btn').onclick = () => openModal('How to play', howToPlayHTML());
-  $('#trouble-practice').onclick = () => { const q = troubleList().map(v => ({ v })); if (q.length) startSession('trouble', q); };
+  const startTrouble = () => { const q = troubleList().map(v => ({ v })); if (q.length) startSession('trouble', q); };
+  $('#trouble-practice').onclick = startTrouble;
+  $('#trouble-banner').onclick = startTrouble;
   $('#modal-close').onclick = closeModal;
   $('#modal').onclick = (e) => { if (e.target.id === 'modal') closeModal(); };
   $('#lightbox').onclick = closeLightbox;
