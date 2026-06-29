@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.5.1';
 const SCHEMA_VERSION = 4;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -28,7 +28,7 @@ const STAGES = [
   { key: 'gold',     emoji: '🌟', name: 'Champion', hint: 'Both lvl 10 — kept perfect for weeks' },
 ];
 const EVO_LEVELS = [2, 5, 9];    // mascot evolves when you reach these levels
-const EVO_NAMES = ['Egg', 'Baby', 'Grown', 'Champion'];
+const EVO_NAMES = ['Baby', 'Young', 'Grown', 'Champion'];
 
 /* ---------- Catalog of cosmetics (safe to extend freely) ---------- */
 const THEMES = [
@@ -38,13 +38,14 @@ const THEMES = [
   { id: 'candy',   name: 'Candy',  unlockXp: 600 },
   { id: 'sunset',  name: 'Sunset', unlockXp: 900 },
 ];
-// forms = evolution chain: [egg, baby, grown, champion]
+// forms = evolution chain: [baby, young, grown, champion]. The creature is always
+// visible (so picking a mascot is obvious); evolution grows its size + adds a crown.
 const MASCOTS = [
-  { id: 'dragon', emoji: '🐉', name: 'Dragon',  unlockXp: 0,   forms: ['🥚', '🐲', '🐉', '🐉'] },
-  { id: 'fox',    emoji: '🦊', name: 'Fox',     unlockXp: 0,   forms: ['🥚', '🐾', '🦊', '🦊'] },
-  { id: 'owl',    emoji: '🦉', name: 'Owl',     unlockXp: 200, forms: ['🥚', '🐥', '🦉', '🦉'] },
-  { id: 'robot',  emoji: '🤖', name: 'Robot',   unlockXp: 450, forms: ['📦', '🔩', '🤖', '🤖'] },
-  { id: 'unicorn',emoji: '🦄', name: 'Unicorn', unlockXp: 750, forms: ['🥚', '🐴', '🦄', '🦄'] },
+  { id: 'dragon', emoji: '🐉', name: 'Dragon',  unlockXp: 0,   forms: ['🐲', '🐲', '🐉', '🐉'] },
+  { id: 'fox',    emoji: '🦊', name: 'Fox',     unlockXp: 0,   forms: ['🦊', '🦊', '🦊', '🦊'] },
+  { id: 'owl',    emoji: '🦉', name: 'Owl',     unlockXp: 200, forms: ['🦉', '🦉', '🦉', '🦉'] },
+  { id: 'robot',  emoji: '🤖', name: 'Robot',   unlockXp: 450, forms: ['🤖', '🤖', '🤖', '🤖'] },
+  { id: 'unicorn',emoji: '🦄', name: 'Unicorn', unlockXp: 750, forms: ['🐴', '🐴', '🦄', '🦄'] },
 ];
 const VOICE_PRESETS = [
   { id: 'normal',   name: 'Normal',   rate: 1.0, pitch: 1.0 },
@@ -1109,7 +1110,7 @@ function onbSteps() {
     },
     { // mascot
       html: `<h2>Choose your buddy</h2>
-        <p>It hatches from an egg and evolves as you level up! 🥚→🐲→🐉</p>
+        <p>It grows up and earns a crown as you level up! 🐲→🐉→👑</p>
         <div class="onb-mascots">${MASCOTS.map(m => {
           const locked = store.stats.xp < m.unlockXp;
           return `<button class="onb-mascot-opt${onb.mascot === m.id ? ' active' : ''}${locked ? ' locked' : ''}" data-m="${m.id}" ${locked ? 'disabled' : ''}>
