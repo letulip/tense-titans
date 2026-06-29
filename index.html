@@ -31,7 +31,7 @@
 
       <div class="stat-row">
         <div class="chip"><span class="chip-ico">🔥</span><b id="home-streak">0</b><small>streak</small></div>
-        <div class="chip"><span class="chip-ico">⭐</span><b id="home-level">1</b><small>level</small></div>
+        <div class="chip"><span class="chip-ico">⭐</span><b id="home-level">1</b><small id="home-rank">Novice</small></div>
         <div class="chip"><span class="chip-ico">🌳</span><b id="home-mastered">0</b><small>mastered</small></div>
       </div>
 
@@ -47,6 +47,13 @@
         </div>
         <div class="goalbar"><div class="goalbar-fill" id="home-goalfill"></div></div>
       </div>
+
+      <button class="review-banner hidden" id="review-banner" data-mode="review">
+        <span class="rb-ico">🔔</span>
+        <span class="rb-text"><b id="review-count">0</b> verbs due for review</span>
+        <span class="rb-go">Review →</span>
+      </button>
+      <div class="review-caughtup hidden" id="review-caughtup">✅ Reviews all caught up</div>
 
       <div class="mode-head">
         <span>Choose a quest</span>

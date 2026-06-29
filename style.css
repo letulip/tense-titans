@@ -298,6 +298,19 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .how-foot { color: var(--muted); font-size: 13px; margin-top: 14px; }
 .unlock-pill.evo { background: rgba(108,92,231,.18); border-color: var(--accent-2); color: var(--accent-2); }
 
+/* ===== Phase 3: review banner ===== */
+.review-banner {
+  width: 100%; display: flex; align-items: center; gap: 12px; cursor: pointer;
+  background: linear-gradient(160deg, var(--accent), var(--accent-2)); border: none; color: #fff;
+  border-radius: var(--radius); padding: 14px 16px; margin-bottom: 16px; box-shadow: var(--shadow);
+}
+.review-banner:active { transform: scale(.98); }
+.review-banner .rb-ico { font-size: 24px; }
+.review-banner .rb-text { flex: 1; text-align: left; font-weight: 600; }
+.review-banner .rb-text b { font-size: 20px; }
+.review-banner .rb-go { font-weight: 800; background: rgba(255,255,255,.22); padding: 6px 12px; border-radius: 99px; font-size: 14px; }
+.review-caughtup { text-align: center; color: var(--muted); font-size: 14px; margin-bottom: 16px; }
+
 /* ===== Phase 2: fun modes ===== */
 .mode-card.fun { background: var(--surface-2); }
 .mode-badge.speed { background: #ff7b54; color: #2a1000; }

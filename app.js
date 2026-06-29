@@ -186,6 +186,12 @@ const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const todayKey = () => new Date().toISOString().slice(0, 10);
 const levelFromXp = (xp) => 1 + Math.floor(xp / 100);
 const xpIntoLevel = (xp) => xp % 100;
+// Rank titles by level (cosmetic motivator).
+const RANKS = [
+  { min: 1, name: 'Novice' }, { min: 3, name: 'Apprentice' }, { min: 5, name: 'Squire' },
+  { min: 8, name: 'Knight' }, { min: 12, name: 'Champion' }, { min: 18, name: 'Titan' },
+];
+function rankTitle(level) { let t = RANKS[0].name; for (const r of RANKS) if (level >= r.min) t = r.name; return t; }
 
 function newForm() { return { lvl: 0, due: 0, peak: 0, correct: 0, wrong: 0 }; }
 function prog(id) {
@@ -228,16 +234,29 @@ function decayAll() {
 }
 // Is a form ready to advance right now? (low levels are instant; high levels are scheduled)
 function formDue(f) { return f.lvl < SCHEDULE_GATE || Date.now() >= (f.due || 0); }
-// How many seen verbs have a form due for review right now.
+// A scheduled form that is past its review date (the "do your reviews" queue).
+function isReviewDue(f) { return f.lvl > 0 && f.lvl >= SCHEDULE_GATE && Date.now() >= (f.due || 0); }
+function dueForms(p) {
+  const out = [];
+  if (isReviewDue(p.past)) out.push('past');
+  if (isReviewDue(p.pp)) out.push('pp');
+  return out;
+}
+// How many seen verbs have at least one form due for review right now.
 function dueCount() {
   let n = 0;
+  for (const v of VERBS) { const p = store.progress[v.id]; if (p && dueForms(p).length) n++; }
+  return n;
+}
+// Flat, shuffled queue of every due form (a verb with both due appears twice).
+function buildReviewQueue() {
+  const q = [];
   for (const v of VERBS) {
     const p = store.progress[v.id];
     if (!p) continue;
-    const due = (f) => f.lvl > 0 && f.lvl >= SCHEDULE_GATE && Date.now() >= (f.due || 0);
-    if (due(p.past) || due(p.pp)) n++;
+    for (const which of dueForms(p)) q.push({ v, which });
   }
-  return n;
+  return shuffle(q);
 }
 
 // ---- Mascot evolution (Tamagotchi-style, driven by level) ----
@@ -335,12 +354,18 @@ function chooseForm(v) {
 /* ============================================================
    Session / gameplay
    ============================================================ */
-function startSession(mode) {
-  const goal = store.settings.dailyGoal || 10;
-  store.stats.modesPlayed[mode] = true;
+function startSession(mode, customQueue) {
+  // Only the four game modes count toward the "played all modes" achievement.
+  if (['pick', 'type', 'match', 'speed'].includes(mode)) store.stats.modesPlayed[mode] = true;
+  let queue = customQueue || null, total = store.settings.dailyGoal || 10;
+  if (mode === 'review') {
+    queue = buildReviewQueue();
+    if (!queue.length) { show('home'); return; }   // nothing due — safety
+  }
+  if (queue) total = Math.min(queue.length, 30);
   session = {
-    mode, total: goal, index: 0, correct: 0, answered: 0, gainedXp: 0,
-    lastId: null, newBudget: { left: NEW_PER_SESSION }, q: null,
+    mode, total, index: 0, correct: 0, answered: 0, gainedXp: 0,
+    lastId: null, newBudget: { left: NEW_PER_SESSION }, q: null, queue,
     // speed-round state
     score: 0, combo: 0, bestCombo: 0, misses: 0,
     endTime: mode === 'speed' ? Date.now() + SPEED_SECONDS * 1000 : 0,
@@ -371,12 +396,18 @@ function nextQuestion() {
     return endSession();
   }
   session.answered = false;
-  const v = pickVerb(session.lastId, session.newBudget);
-  session.lastId = v.id;
+  let v, which = null;
+  if (session.queue) {            // review / trouble-spots use a fixed queue
+    const item = session.queue[session.index];
+    v = item.v; which = item.which || null;
+  } else {
+    v = pickVerb(session.lastId, session.newBudget);
+    session.lastId = v.id;
+  }
   if (session.mode === 'match') {
     session.q = { kind: 'translate', v, answer: v.ru.join(', ') };
   } else {
-    const which = chooseForm(v);   // test the form that needs it most
+    which = which || chooseForm(v);   // test the form that needs it most
     session.q = { kind: 'form', v, which, answer: v[which] };
   }
   renderQuestion();
@@ -413,8 +444,8 @@ function renderQuestion() {
   const area = $('#answer-area');
   area.innerHTML = '';
   if (kind === 'translate') buildTranslateOptions(area);
-  else if (session.mode === 'type') buildTypeInput(area);
-  else buildOptions(area);              // pick & speed -> multiple choice
+  else if (session.mode === 'type' || session.mode === 'review') buildTypeInput(area);  // recall
+  else buildOptions(area);              // pick, speed, trouble -> multiple choice
 }
 
 function buildOptions(area) {
@@ -478,17 +509,18 @@ function handleAnswer(given, el) {
   if (ok) { session.correct++; store.stats.totalCorrect++; }
 
   let hint = '';
-  if (q.kind === 'form' && (session.mode === 'pick' || session.mode === 'type')) {
-    // --- spaced-repetition leveling (learning modes only) ---
+  if (q.kind === 'form' && ['pick', 'type', 'review', 'trouble'].includes(session.mode)) {
+    // --- spaced-repetition leveling (learning + review + trouble modes) ---
+    const recall = session.mode === 'type' || session.mode === 'review';   // typed = recall
     const p = prog(q.v.id), f = p[q.which];
     p.lastSeen = Date.now();
     if (ok) {
       f.correct++;
-      if (session.mode === 'type') store.stats.typeCorrect++;
-      addXp(session.mode === 'type' ? 15 : 10);
-      const modeCap = session.mode === 'type' ? FORM_MAX : PICK_FORM_CAP;
+      if (recall) store.stats.typeCorrect++;
+      addXp(recall ? 15 : 10);
+      const modeCap = recall ? FORM_MAX : PICK_FORM_CAP;
       if (f.lvl >= modeCap) {
-        hint = session.mode === 'pick' ? 'Switch to ⌨️ Type it to level up!' : '';
+        hint = !recall ? 'Switch to ⌨️ Type it to level up!' : '';
       } else if (f.lvl >= SCHEDULE_GATE && Date.now() < (f.due || 0)) {
         hint = 'Counts! Comes back for review later ⏳';
       } else {
@@ -609,8 +641,12 @@ function endSession() {
   const { unlocks, evolved } = collectRewards();
   saveStore();
 
+  const titles = {
+    review:  perfect ? 'Reviews cleared! 🔔' : 'Reviews done!',
+    trouble: perfect ? 'Trouble cleared! 💪' : 'Good practice!',
+  };
   $('#results-emoji').textContent = perfect ? '🏆' : (acc >= 60 ? '🎉' : '💡');
-  $('#results-title').textContent = perfect ? 'Flawless quest!' : 'Quest complete!';
+  $('#results-title').textContent = titles[session.mode] || (perfect ? 'Flawless quest!' : 'Quest complete!');
   $('#results-correct').textContent = session.correct + '/' + session.total;
   $('#results-accuracy').textContent = acc + '%';
   $('#results-xp').textContent = '+' + session.gainedXp;
@@ -810,10 +846,17 @@ function renderHome() {
   $('#home-xpfill').style.width = xpIntoLevel(st.xp) + '%';
   $('#home-xptext').textContent = st.xp + ' XP';
   $('#home-xpnext').textContent = 'Lv ' + (levelFromXp(st.xp) + 1) + ' in ' + (100 - xpIntoLevel(st.xp)) + ' XP';
+  $('#home-rank').textContent = rankTitle(levelFromXp(st.xp));
   const doneToday = st.history[todayKey()] || 0;
   const goal = s.dailyGoal || 10;
   $('#home-goaltext').textContent = Math.min(doneToday, goal) + ' / ' + goal;
   $('#home-goalfill').style.width = Math.min(100, doneToday / goal * 100) + '%';
+  // Review banner: show due count, or a calm "caught up" note
+  const due = dueCount();
+  const banner = $('#review-banner');
+  banner.classList.toggle('hidden', due === 0);
+  $('#review-caughtup').classList.toggle('hidden', due > 0);
+  if (due > 0) $('#review-count').textContent = due;
 }
 
 // Mascot speech bubble — reacts to streak / daily goal.
