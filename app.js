@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.4.3';
+const APP_VERSION = '1.5.0';
 const SCHEMA_VERSION = 4;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -104,7 +104,7 @@ function defaultStore() {
     achievements: {},      // id -> ISO date unlocked
     settings: {
       name: '', mascot: 'dragon', theme: 'default', dark: false,
-      sound: true, voiceURI: '', rate: 1, pitch: 1, dailyGoal: 10,
+      sound: true, voiceURI: '', rate: 1, pitch: 1, dailyGoal: 10, reduceEffects: false,
     },
     flags: { onboarded: false, evoStage: 0 },
   };
@@ -186,6 +186,12 @@ const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const todayKey = () => new Date().toISOString().slice(0, 10);
 const levelFromXp = (xp) => 1 + Math.floor(xp / 100);
 const xpIntoLevel = (xp) => xp % 100;
+// Rank titles by level (cosmetic motivator).
+const RANKS = [
+  { min: 1, name: 'Novice' }, { min: 3, name: 'Apprentice' }, { min: 5, name: 'Squire' },
+  { min: 8, name: 'Knight' }, { min: 12, name: 'Champion' }, { min: 18, name: 'Titan' },
+];
+function rankTitle(level) { let t = RANKS[0].name; for (const r of RANKS) if (level >= r.min) t = r.name; return t; }
 
 function newForm() { return { lvl: 0, due: 0, peak: 0, correct: 0, wrong: 0 }; }
 function prog(id) {
@@ -228,16 +234,45 @@ function decayAll() {
 }
 // Is a form ready to advance right now? (low levels are instant; high levels are scheduled)
 function formDue(f) { return f.lvl < SCHEDULE_GATE || Date.now() >= (f.due || 0); }
-// How many seen verbs have a form due for review right now.
+// A scheduled form that is past its review date (the "do your reviews" queue).
+function isReviewDue(f) { return f.lvl > 0 && f.lvl >= SCHEDULE_GATE && Date.now() >= (f.due || 0); }
+function dueForms(p) {
+  const out = [];
+  if (isReviewDue(p.past)) out.push('past');
+  if (isReviewDue(p.pp)) out.push('pp');
+  return out;
+}
+// How many seen verbs have at least one form due for review right now.
 function dueCount() {
   let n = 0;
+  for (const v of VERBS) { const p = store.progress[v.id]; if (p && dueForms(p).length) n++; }
+  return n;
+}
+// Flat, shuffled queue of every due form (a verb with both due appears twice).
+function buildReviewQueue() {
+  const q = [];
   for (const v of VERBS) {
     const p = store.progress[v.id];
     if (!p) continue;
-    const due = (f) => f.lvl > 0 && f.lvl >= SCHEDULE_GATE && Date.now() >= (f.due || 0);
-    if (due(p.past) || due(p.pp)) n++;
+    for (const which of dueForms(p)) q.push({ v, which });
   }
-  return n;
+  return shuffle(q);
+}
+
+// "Trouble spots": verbs you keep missing (weighted by wrongs, low accuracy, low level).
+function troubleScore(v) {
+  const p = store.progress[v.id];
+  if (!p) return 0;
+  const wrongs = p.past.wrong + p.pp.wrong;
+  if (wrongs === 0) return 0;
+  const total = wrongs + p.past.correct + p.pp.correct;
+  const acc = total ? (p.past.correct + p.pp.correct) / total : 1;
+  return wrongs * 2 + (1 - acc) * 10 + (FORM_MAX - minLvl(p)) * 0.5;
+}
+function troubleList(n = 10) {
+  return VERBS.filter(v => troubleScore(v) > 0)
+    .sort((a, b) => troubleScore(b) - troubleScore(a))
+    .slice(0, n);
 }
 
 // ---- Mascot evolution (Tamagotchi-style, driven by level) ----
@@ -335,12 +370,18 @@ function chooseForm(v) {
 /* ============================================================
    Session / gameplay
    ============================================================ */
-function startSession(mode) {
-  const goal = store.settings.dailyGoal || 10;
-  store.stats.modesPlayed[mode] = true;
+function startSession(mode, customQueue) {
+  // Only the four game modes count toward the "played all modes" achievement.
+  if (['pick', 'type', 'match', 'speed'].includes(mode)) store.stats.modesPlayed[mode] = true;
+  let queue = customQueue || null, total = store.settings.dailyGoal || 10;
+  if (mode === 'review') {
+    queue = buildReviewQueue();
+    if (!queue.length) { show('home'); return; }   // nothing due — safety
+  }
+  if (queue) total = Math.min(queue.length, 30);
   session = {
-    mode, total: goal, index: 0, correct: 0, answered: 0, gainedXp: 0,
-    lastId: null, newBudget: { left: NEW_PER_SESSION }, q: null,
+    mode, total, index: 0, correct: 0, answered: 0, gainedXp: 0,
+    lastId: null, newBudget: { left: NEW_PER_SESSION }, q: null, queue,
     // speed-round state
     score: 0, combo: 0, bestCombo: 0, misses: 0,
     endTime: mode === 'speed' ? Date.now() + SPEED_SECONDS * 1000 : 0,
@@ -371,12 +412,18 @@ function nextQuestion() {
     return endSession();
   }
   session.answered = false;
-  const v = pickVerb(session.lastId, session.newBudget);
-  session.lastId = v.id;
+  let v, which = null;
+  if (session.queue) {            // review / trouble-spots use a fixed queue
+    const item = session.queue[session.index];
+    v = item.v; which = item.which || null;
+  } else {
+    v = pickVerb(session.lastId, session.newBudget);
+    session.lastId = v.id;
+  }
   if (session.mode === 'match') {
     session.q = { kind: 'translate', v, answer: v.ru.join(', ') };
   } else {
-    const which = chooseForm(v);   // test the form that needs it most
+    which = which || chooseForm(v);   // test the form that needs it most
     session.q = { kind: 'form', v, which, answer: v[which] };
   }
   renderQuestion();
@@ -413,8 +460,8 @@ function renderQuestion() {
   const area = $('#answer-area');
   area.innerHTML = '';
   if (kind === 'translate') buildTranslateOptions(area);
-  else if (session.mode === 'type') buildTypeInput(area);
-  else buildOptions(area);              // pick & speed -> multiple choice
+  else if (session.mode === 'type' || session.mode === 'review') buildTypeInput(area);  // recall
+  else buildOptions(area);              // pick, speed, trouble -> multiple choice
 }
 
 function buildOptions(area) {
@@ -478,17 +525,18 @@ function handleAnswer(given, el) {
   if (ok) { session.correct++; store.stats.totalCorrect++; }
 
   let hint = '';
-  if (q.kind === 'form' && (session.mode === 'pick' || session.mode === 'type')) {
-    // --- spaced-repetition leveling (learning modes only) ---
+  if (q.kind === 'form' && ['pick', 'type', 'review', 'trouble'].includes(session.mode)) {
+    // --- spaced-repetition leveling (learning + review + trouble modes) ---
+    const recall = session.mode === 'type' || session.mode === 'review';   // typed = recall
     const p = prog(q.v.id), f = p[q.which];
     p.lastSeen = Date.now();
     if (ok) {
       f.correct++;
-      if (session.mode === 'type') store.stats.typeCorrect++;
-      addXp(session.mode === 'type' ? 15 : 10);
-      const modeCap = session.mode === 'type' ? FORM_MAX : PICK_FORM_CAP;
+      if (recall) store.stats.typeCorrect++;
+      addXp(recall ? 15 : 10);
+      const modeCap = recall ? FORM_MAX : PICK_FORM_CAP;
       if (f.lvl >= modeCap) {
-        hint = session.mode === 'pick' ? 'Switch to ⌨️ Type it to level up!' : '';
+        hint = !recall ? 'Switch to ⌨️ Type it to level up!' : '';
       } else if (f.lvl >= SCHEDULE_GATE && Date.now() < (f.due || 0)) {
         hint = 'Counts! Comes back for review later ⏳';
       } else {
@@ -609,8 +657,12 @@ function endSession() {
   const { unlocks, evolved } = collectRewards();
   saveStore();
 
+  const titles = {
+    review:  perfect ? 'Reviews cleared! 🔔' : 'Reviews done!',
+    trouble: perfect ? 'Trouble cleared! 💪' : 'Good practice!',
+  };
   $('#results-emoji').textContent = perfect ? '🏆' : (acc >= 60 ? '🎉' : '💡');
-  $('#results-title').textContent = perfect ? 'Flawless quest!' : 'Quest complete!';
+  $('#results-title').textContent = titles[session.mode] || (perfect ? 'Flawless quest!' : 'Quest complete!');
   $('#results-correct').textContent = session.correct + '/' + session.total;
   $('#results-accuracy').textContent = acc + '%';
   $('#results-xp').textContent = '+' + session.gainedXp;
@@ -761,6 +813,7 @@ function sfx(type) {
 
 // Lightweight confetti (DOM particles, auto-removed). Visual only.
 function confettiBurst(n = 14) {
+  if (reduceMotion()) return;
   const root = $('#confetti'); if (!root) return;
   const colors = ['#ffd166', '#6c5ce7', '#2ecc71', '#ff6b6b', '#a29bfe', '#00b3c4'];
   for (let i = 0; i < n; i++) {
@@ -787,9 +840,14 @@ function showCombo(n) {
 /* ============================================================
    Rendering: home / stats / achievements / settings
    ============================================================ */
+function reduceMotion() {
+  return !!store.settings.reduceEffects ||
+    (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
 function applyCosmetics() {
   document.documentElement.setAttribute('data-theme', store.settings.theme || 'default');
   document.documentElement.setAttribute('data-dark', store.settings.dark ? 'true' : 'false');
+  document.documentElement.setAttribute('data-reduce', reduceMotion() ? 'true' : 'false');
 }
 
 function renderHome() {
@@ -810,10 +868,17 @@ function renderHome() {
   $('#home-xpfill').style.width = xpIntoLevel(st.xp) + '%';
   $('#home-xptext').textContent = st.xp + ' XP';
   $('#home-xpnext').textContent = 'Lv ' + (levelFromXp(st.xp) + 1) + ' in ' + (100 - xpIntoLevel(st.xp)) + ' XP';
+  $('#home-rank').textContent = rankTitle(levelFromXp(st.xp));
   const doneToday = st.history[todayKey()] || 0;
   const goal = s.dailyGoal || 10;
   $('#home-goaltext').textContent = Math.min(doneToday, goal) + ' / ' + goal;
   $('#home-goalfill').style.width = Math.min(100, doneToday / goal * 100) + '%';
+  // Review banner: show due count, or a calm "caught up" note
+  const due = dueCount();
+  const banner = $('#review-banner');
+  banner.classList.toggle('hidden', due === 0);
+  $('#review-caughtup').classList.toggle('hidden', due > 0);
+  if (due > 0) $('#review-count').textContent = due;
 }
 
 // Mascot speech bubble — reacts to streak / daily goal.
@@ -834,6 +899,32 @@ function evoCaption() {
   return `✨ ${toNext} XP to evolve your ${mascotDef().name}`;
 }
 
+// GitHub-style activity heatmap of the last 12 weeks from stats.history.
+function actLevel(c) { if (!c) return 0; if (c >= 20) return 4; if (c >= 10) return 3; if (c >= 5) return 2; return 1; }
+function renderActivity() {
+  const st = store.stats;
+  $('#activity-streaks').innerHTML =
+    `<span>🔥 Current <b>${st.dayStreak}</b></span><span>🏆 Best <b>${st.bestStreak}</b></span>`;
+  const weeks = 12, total = weeks * 7;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const oldest = new Date(today.getTime() - (total - 1) * DAY);
+  const padStart = (oldest.getDay() + 6) % 7;   // weekday with Monday = 0
+  const grid = [];
+  let week = new Array(padStart).fill(null);
+  for (let i = total - 1; i >= 0; i--) {
+    const d = new Date(today.getTime() - i * DAY);
+    const key = d.toISOString().slice(0, 10);
+    week.push({ key, count: st.history[key] || 0, isToday: i === 0 });
+    if (week.length === 7) { grid.push(week); week = []; }
+  }
+  if (week.length) { while (week.length < 7) week.push(null); grid.push(week); }
+  $('#activity-grid').innerHTML = grid.map(col =>
+    `<div class="act-week">${col.map(cell => cell
+      ? `<span class="act act-${actLevel(cell.count)}${cell.isToday ? ' today' : ''}" title="${cell.key}: ${cell.count}"></span>`
+      : `<span class="act empty"></span>`).join('')}</div>`
+  ).join('');
+}
+
 function renderStats() {
   const st = store.stats;
   decayAll();
@@ -846,10 +937,19 @@ function renderStats() {
     <div class="box"><b>${acc}%</b><small>accuracy</small></div>
     <div class="box"><b>${due}</b><small>due now 🔔</small></div>`;
 
+  renderActivity();
+
   // Legend: explain the stages and how to advance.
   $('#stats-legend').innerHTML = STAGES.map(s =>
     `<div class="legend-item"><span class="lg-emoji">${s.emoji}</span><span class="lg-text"><b>${s.name}</b> — ${s.hint}</span></div>`
   ).join('');
+
+  // Trouble spots: the verbs you keep missing.
+  const trouble = troubleList();
+  $('#trouble-section').classList.toggle('hidden', trouble.length === 0);
+  if (trouble.length) {
+    $('#trouble-list').innerHTML = trouble.map(v => `<span class="trouble-chip">${v.base}</span>`).join('');
+  }
 
   const lvlBar = (f, label) => {
     const dueNow = f.lvl >= SCHEDULE_GATE && Date.now() >= (f.due || 0);
@@ -896,6 +996,7 @@ function renderSettings() {
   const s = store.settings, xp = store.stats.xp;
   $('#set-name').value = s.name || '';
   $('#set-dark').checked = !!s.dark;
+  $('#set-reduce').checked = !!s.reduceEffects;
   $('#set-sound').checked = !!s.sound;
   $('#set-rate').value = s.rate; $('#rate-val').textContent = '×' + s.rate;
   $('#set-pitch').value = s.pitch; $('#pitch-val').textContent = '×' + s.pitch;
@@ -1121,6 +1222,7 @@ function wire() {
   // settings inputs
   $('#set-name').oninput = (e) => { store.settings.name = e.target.value; saveStore(); };
   $('#set-dark').onchange = (e) => { store.settings.dark = e.target.checked; applyCosmetics(); saveStore(); };
+  $('#set-reduce').onchange = (e) => { store.settings.reduceEffects = e.target.checked; applyCosmetics(); saveStore(); };
   $('#set-sound').onchange = (e) => { store.settings.sound = e.target.checked; saveStore(); };
   $('#set-rate').oninput = (e) => { store.settings.rate = +e.target.value; $('#rate-val').textContent = '×' + e.target.value; saveStore(); };
   $('#set-pitch').oninput = (e) => { store.settings.pitch = +e.target.value; $('#pitch-val').textContent = '×' + e.target.value; saveStore(); };
@@ -1143,6 +1245,7 @@ function wire() {
   $('#onb-back').onclick = onbBack;
   $('#onb-skip').onclick = finishOnboarding;
   $('#how-btn').onclick = () => openModal('How to play', howToPlayHTML());
+  $('#trouble-practice').onclick = () => { const q = troubleList().map(v => ({ v })); if (q.length) startSession('trouble', q); };
   $('#modal-close').onclick = closeModal;
   $('#modal').onclick = (e) => { if (e.target.id === 'modal') closeModal(); };
 
