@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.6.1';
+const APP_VERSION = '1.7.0';
 const SCHEMA_VERSION = 5;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -27,8 +27,9 @@ const STAGES = [
   { key: 'mastered', emoji: '🌳', name: 'Mastered', hint: 'Both lvl 7+ via ⌨️ Type it (~1 week+)' },
   { key: 'gold',     emoji: '🌟', name: 'Champion', hint: 'Both lvl 10 — kept perfect for weeks' },
 ];
-const EVO_LEVELS = [2, 4, 6];    // mascot evolves at these levels (~100 / 700 / 3100 XP)
-const EVO_NAMES = ['Baby', 'Young', 'Grown', 'Champion'];
+// 6 illustrated evolution stages (images 1..6). Evolve at these levels -> stages 1..5.
+const EVO_LEVELS = [2, 3, 4, 5, 6];   // ~100 / 300 / 700 / 1500 / 3100 XP
+const EVO_NAMES = ['Hatchling', 'Youngling', 'Adept', 'Warrior', 'Elder', 'Champion'];
 
 /* ---------- Catalog of cosmetics (safe to extend freely) ---------- */
 // Cosmetics unlock by MEANINGFUL milestones (req), not raw XP — see reqMet/reqText.
@@ -42,12 +43,13 @@ const THEMES = [
 ];
 // forms = evolution chain: [baby, young, grown, champion]. The creature is always
 // visible (so picking a mascot is obvious); evolution grows its size + adds a crown.
+// img = filename prefix in images/mascots/<id>/<img>{1..6}-fs8.webp ; emoji used in settings only.
 const MASCOTS = [
-  { id: 'dragon', emoji: '🐉', name: 'Dragon',  req: null,                    forms: ['🐲', '🐲', '🐉', '🐉'] },
-  { id: 'fox',    emoji: '🦊', name: 'Fox',     req: null,                    forms: ['🦊', '🦊', '🦊', '🦊'] },
-  { id: 'owl',    emoji: '🦉', name: 'Owl',     req: { type: 'mastered', n: 5 },  forms: ['🦉', '🦉', '🦉', '🦉'] },
-  { id: 'robot',  emoji: '🤖', name: 'Robot',   req: { type: 'level',    n: 6 },  forms: ['🤖', '🤖', '🤖', '🤖'] },
-  { id: 'unicorn',emoji: '🦄', name: 'Unicorn', req: { type: 'streak',   n: 7 },  forms: ['🐴', '🐴', '🦄', '🦄'] },
+  { id: 'dragon', emoji: '🐉', name: 'Dragon',  img: 'dragon', req: null,                       forms: ['🐲', '🐲', '🐉', '🐉'] },
+  { id: 'fox',    emoji: '🦊', name: 'Fox',     img: 'fox',    req: null,                       forms: ['🦊', '🦊', '🦊', '🦊'] },
+  { id: 'owl',    emoji: '🦉', name: 'Owl',     img: 'owl',    req: { type: 'mastered', n: 5 }, forms: ['🦉', '🦉', '🦉', '🦉'] },
+  { id: 'robot',  emoji: '🤖', name: 'Robot',   img: 'robot',  req: { type: 'level',    n: 6 }, forms: ['🤖', '🤖', '🤖', '🤖'] },
+  { id: 'unicorn',emoji: '🦄', name: 'Unicorn', img: 'uni',    req: { type: 'streak',   n: 7 }, forms: ['🐴', '🐴', '🦄', '🦄'] },
 ];
 const VOICE_PRESETS = [
   { id: 'normal',   name: 'Normal',   rate: 1.0, pitch: 1.0 },
@@ -302,6 +304,8 @@ function evoStageForLevel(level) {
 function currentEvoStage() { return evoStageForLevel(levelFromXp(store.stats.xp)); }
 function mascotDef() { return MASCOTS.find(m => m.id === store.settings.mascot) || MASCOTS[0]; }
 function mascotFormEmoji(stage) { return mascotDef().forms[stage] || mascotDef().emoji; }
+// Path to the illustrated artwork for an evolution stage (0..5 -> image 1..6).
+function mascotImg(stage) { const m = mascotDef(); return `images/mascots/${m.id}/${m.img}${stage + 1}-fs8.webp`; }
 // XP remaining until the next evolution (or null if maxed).
 function xpToNextEvo() {
   const lvl = levelFromXp(store.stats.xp);
@@ -915,9 +919,10 @@ function renderHome() {
   const s = store.settings, st = store.stats;
   const stage = currentEvoStage();
   const mEl = $('#home-mascot');
-  mEl.textContent = mascotFormEmoji(stage);
-  mEl.className = 'mascot evo-' + stage;            // CSS grows the glyph per stage
-  mEl.classList.toggle('champion', stage === 3);
+  mEl.className = 'mascot-banner';
+  mEl.innerHTML = `<img class="mascot-img" src="${mascotImg(stage)}" alt="${mascotDef().name}" />`;
+  // graceful fallback to the emoji if the artwork can't load (e.g. offline & uncached)
+  mEl.firstChild.onerror = () => { mEl.classList.add('emoji-fallback'); mEl.textContent = mascotDef().emoji; };
   $('#home-hello').textContent = s.name ? `Hey, ${s.name}!` : 'Hey, hero!';
   $('#home-sub').textContent = homeMood();
   $('#home-evo').textContent = evoCaption();
