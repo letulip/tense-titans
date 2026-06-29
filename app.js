@@ -4,8 +4,8 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.5.2';
-const SCHEMA_VERSION = 4;        // bump + add a migration when store shape changes
+const APP_VERSION = '1.6.0';
+const SCHEMA_VERSION = 5;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
 
@@ -31,21 +31,23 @@ const EVO_LEVELS = [2, 5, 9];    // mascot evolves when you reach these levels
 const EVO_NAMES = ['Baby', 'Young', 'Grown', 'Champion'];
 
 /* ---------- Catalog of cosmetics (safe to extend freely) ---------- */
+// Cosmetics unlock by MEANINGFUL milestones (req), not raw XP — see reqMet/reqText.
+// req types: {level:n} | {mastered:n} | {streak:n} | {champion:n}. No req = always free.
 const THEMES = [
-  { id: 'default', name: 'Royal',  unlockXp: 0 },
-  { id: 'ocean',   name: 'Ocean',  unlockXp: 150 },
-  { id: 'forest',  name: 'Forest', unlockXp: 350 },
-  { id: 'candy',   name: 'Candy',  unlockXp: 600 },
-  { id: 'sunset',  name: 'Sunset', unlockXp: 900 },
+  { id: 'default', name: 'Royal',  req: null },
+  { id: 'ocean',   name: 'Ocean',  req: { type: 'level',    n: 4 } },
+  { id: 'forest',  name: 'Forest', req: { type: 'streak',   n: 3 } },
+  { id: 'candy',   name: 'Candy',  req: { type: 'mastered', n: 15 } },
+  { id: 'sunset',  name: 'Sunset', req: { type: 'mastered', n: 30 } },
 ];
 // forms = evolution chain: [baby, young, grown, champion]. The creature is always
 // visible (so picking a mascot is obvious); evolution grows its size + adds a crown.
 const MASCOTS = [
-  { id: 'dragon', emoji: '🐉', name: 'Dragon',  unlockXp: 0,   forms: ['🐲', '🐲', '🐉', '🐉'] },
-  { id: 'fox',    emoji: '🦊', name: 'Fox',     unlockXp: 0,   forms: ['🦊', '🦊', '🦊', '🦊'] },
-  { id: 'owl',    emoji: '🦉', name: 'Owl',     unlockXp: 200, forms: ['🦉', '🦉', '🦉', '🦉'] },
-  { id: 'robot',  emoji: '🤖', name: 'Robot',   unlockXp: 450, forms: ['🤖', '🤖', '🤖', '🤖'] },
-  { id: 'unicorn',emoji: '🦄', name: 'Unicorn', unlockXp: 750, forms: ['🐴', '🐴', '🦄', '🦄'] },
+  { id: 'dragon', emoji: '🐉', name: 'Dragon',  req: null,                    forms: ['🐲', '🐲', '🐉', '🐉'] },
+  { id: 'fox',    emoji: '🦊', name: 'Fox',     req: null,                    forms: ['🦊', '🦊', '🦊', '🦊'] },
+  { id: 'owl',    emoji: '🦉', name: 'Owl',     req: { type: 'mastered', n: 5 },  forms: ['🦉', '🦉', '🦉', '🦉'] },
+  { id: 'robot',  emoji: '🤖', name: 'Robot',   req: { type: 'level',    n: 10 }, forms: ['🤖', '🤖', '🤖', '🤖'] },
+  { id: 'unicorn',emoji: '🦄', name: 'Unicorn', req: { type: 'streak',   n: 7 },  forms: ['🐴', '🐴', '🦄', '🦄'] },
 ];
 const VOICE_PRESETS = [
   { id: 'normal',   name: 'Normal',   rate: 1.0, pitch: 1.0 },
@@ -107,7 +109,7 @@ function defaultStore() {
       name: '', mascot: 'dragon', theme: 'default', dark: false,
       sound: true, voiceURI: '', rate: 1, pitch: 1, dailyGoal: 10, reduceEffects: false,
     },
-    flags: { onboarded: false, evoStage: 0 },
+    flags: { onboarded: false, evoStage: 0, unlocked: {} },
   };
 }
 
@@ -149,6 +151,17 @@ function migrate(s) {
         };
       }
     }
+  }
+  // v4 -> v5: cosmetics now unlock by meaningful milestones (mastery/streak/level),
+  // not raw XP. Honestly re-lock everything, but keep whatever the player is currently
+  // wearing so nothing they chose disappears. markUnlocks() later re-grants any already met.
+  if ((s.schemaVersion || 1) < 5) {
+    s.flags = s.flags || {};
+    s.flags.unlocked = {};
+    const sel = s.settings || {};
+    if (sel.mascot) s.flags.unlocked[sel.mascot] = true;
+    if (sel.theme) s.flags.unlocked[sel.theme] = true;
+    delete s._announced;   // old XP-announcement bookkeeping no longer used
   }
   // Always fill any newly-added default fields without dropping the player's data.
   s = fillDefaults(s, defaultStore());
@@ -748,20 +761,47 @@ function drainAchQueue() {
     achQueue.shift(); if (achQueue.length) drainAchQueue();
   }, 2700);
 }
-// Returns names of cosmetics newly crossed the XP threshold (for the results screen).
-function checkUnlocks() {
-  const xp = store.stats.xp;
-  if (!store._announced) store._announced = {};
-  const out = [];
-  const all = [...THEMES.map(t => ({ ...t, kind: 'Theme' })),
-               ...MASCOTS.map(m => ({ ...m, kind: 'Mascot' }))];
-  for (const c of all) {
-    if (c.unlockXp > 0 && xp >= c.unlockXp && !store._announced[c.kind + c.id]) {
-      store._announced[c.kind + c.id] = true;
-      out.push(c.kind + ' ' + (c.name || c.emoji));
-    }
+/* ============================================================
+   Cosmetic unlocks (meaningful milestones, sticky once earned)
+   ============================================================ */
+function reqMet(req) {
+  if (!req) return true;
+  const st = store.stats;
+  switch (req.type) {
+    case 'level':    return levelFromXp(st.xp) >= req.n;
+    case 'mastered': return masteredCount() >= req.n;
+    case 'streak':   return st.bestStreak >= req.n;   // best ever, so it never re-locks
+    case 'champion': return championCount() >= req.n;
+    default:         return true;
   }
-  return out;
+}
+function reqText(req) {
+  if (!req) return '';
+  switch (req.type) {
+    case 'level':    return 'Reach level ' + req.n;
+    case 'mastered': return 'Master ' + req.n + ' verbs 🌳';
+    case 'streak':   return req.n + '-day streak 🔥';
+    case 'champion': return req.n + ' Champion verb 🌟';
+    default:         return '';
+  }
+}
+function unlockedMap() { if (!store.flags.unlocked) store.flags.unlocked = {}; return store.flags.unlocked; }
+function isUnlocked(c) { return !c.req || !!unlockedMap()[c.id] || reqMet(c.req); }
+function cosmeticList() {
+  return [...THEMES.map(t => ({ ...t, kind: 'Theme' })), ...MASCOTS.map(m => ({ ...m, kind: 'Mascot' }))];
+}
+// Flag any newly-earned cosmetics (sticky) and return them for announcement.
+function markUnlocks() {
+  const u = unlockedMap(), newly = [];
+  for (const c of cosmeticList()) {
+    if (c.req && !u[c.id] && reqMet(c.req)) { u[c.id] = true; newly.push(c); }
+  }
+  if (newly.length) saveStore();
+  return newly;
+}
+// Names of cosmetics newly unlocked this session (for the results screen).
+function checkUnlocks() {
+  return markUnlocks().map(c => c.kind + ' ' + (c.name || c.emoji));
 }
 
 /* ============================================================
@@ -1008,7 +1048,8 @@ function renderAchievements() {
 }
 
 function renderSettings() {
-  const s = store.settings, xp = store.stats.xp;
+  const s = store.settings;
+  markUnlocks();   // flag anything just earned so the pickers are current
   $('#set-name').value = s.name || '';
   $('#set-dark').checked = !!s.dark;
   $('#set-reduce').checked = !!s.reduceEffects;
@@ -1021,24 +1062,28 @@ function renderSettings() {
   // mascots
   const mp = $('#mascot-picker'); mp.innerHTML = '';
   MASCOTS.forEach(m => {
-    const locked = xp < m.unlockXp;
+    const unlocked = isUnlocked(m);
     const b = document.createElement('button');
-    b.className = 'mascot-opt' + (s.mascot === m.id ? ' active' : '') + (locked ? ' locked' : '');
-    b.textContent = locked ? '🔒' : m.emoji;
-    b.title = locked ? `Unlock at ${m.unlockXp} XP` : m.id;
-    if (!locked) b.onclick = () => { s.mascot = m.id; saveStore(); renderSettings(); };
+    b.className = 'mascot-opt' + (s.mascot === m.id ? ' active' : '') + (unlocked ? '' : ' locked');
+    b.textContent = unlocked ? m.emoji : '🔒';
+    b.title = unlocked ? m.name : `${m.name} — ${reqText(m.req)}`;
+    b.onclick = unlocked
+      ? () => { s.mascot = m.id; saveStore(); renderSettings(); }
+      : () => toast(`🔒 ${m.emoji} ${m.name} — ${reqText(m.req)}`);
     mp.appendChild(b);
   });
   // themes
   const tp = $('#theme-picker'); tp.innerHTML = '';
   THEMES.forEach(t => {
-    const locked = xp < t.unlockXp;
+    const unlocked = isUnlocked(t);
     const b = document.createElement('button');
-    b.className = 'theme-dot' + (s.theme === t.id ? ' active' : '') + (locked ? ' locked' : '');
+    b.className = 'theme-dot' + (s.theme === t.id ? ' active' : '') + (unlocked ? '' : ' locked');
     b.setAttribute('data-theme', t.id);
     b.style.background = themeSwatch(t.id);
-    b.title = locked ? `${t.name} — unlock at ${t.unlockXp} XP` : t.name;
-    if (!locked) b.onclick = () => { s.theme = t.id; saveStore(); applyCosmetics(); renderSettings(); };
+    b.title = unlocked ? t.name : `${t.name} — ${reqText(t.req)}`;
+    b.onclick = unlocked
+      ? () => { s.theme = t.id; saveStore(); applyCosmetics(); renderSettings(); }
+      : () => toast(`🔒 ${t.name} theme — ${reqText(t.req)}`);
     tp.appendChild(b);
   });
   // voice presets
@@ -1127,9 +1172,9 @@ function onbSteps() {
       html: `<h2>Choose your buddy</h2>
         <p>It grows up and earns a crown as you level up! 🐲→🐉→👑</p>
         <div class="onb-mascots">${MASCOTS.map(m => {
-          const locked = store.stats.xp < m.unlockXp;
+          const locked = !isUnlocked(m);
           return `<button class="onb-mascot-opt${onb.mascot === m.id ? ' active' : ''}${locked ? ' locked' : ''}" data-m="${m.id}" ${locked ? 'disabled' : ''}>
-            <span class="om-emoji">${locked ? '🔒' : adult(m)}</span><span class="om-name">${locked ? m.unlockXp + ' XP' : m.name}</span></button>`;
+            <span class="om-emoji">${locked ? '🔒' : adult(m)}</span><span class="om-name">${locked ? reqText(m.req) : m.name}</span></button>`;
         }).join('')}</div>`,
       next: 'Next',
     },
@@ -1310,6 +1355,7 @@ async function boot() {
   }
   VERBS.forEach(v => verbById[v.id] = v);
   decayAll();           // apply the forgetting curve for any time away
+  markUnlocks();        // grant any cosmetics already earned under the new rules
   // "Comeback Kid": flag a long absence so the next answer unlocks it
   const last = store.stats.lastStudyDate;
   if (last && (Date.now() - new Date(last).getTime()) / DAY >= 7) store.flags.comebackPending = true;
