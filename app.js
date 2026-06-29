@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.8.4';
+const APP_VERSION = '1.8.5';
 const SCHEMA_VERSION = 6;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -505,9 +505,10 @@ function regularize(base) {
   if (/e$/i.test(base)) return base + 'd';
   return base + 'ed';
 }
-// Verbs whose regular "-ed" form is ALSO valid English (burnt/burned, shone/shined…) — never
-// trap with the -ed form for these, or we'd mark a correct answer wrong.
-const ED_ALSO_VALID = new Set(['burn', 'learn', 'spell', 'smell', 'spoil', 'dream', 'lean', 'leap', 'kneel', 'light', 'speed', 'shine', 'broadcast']);
+// The clean -t/-ed pairs (burn, learn, spell…) now carry BOTH forms in verbs.json ("burnt/burned"),
+// so isCorrect accepts either and the -ed distractor is auto-rejected. This set is only the verbs
+// whose -ed form is valid but rarer/sense-specific (kept single-form), so we skip the -ed trap there.
+const ED_ALSO_VALID = new Set(['kneel', 'light', 'speed', 'shine', 'broadcast']);
 
 function buildOptions(area) {
   const { v, which, answer } = session.q;
