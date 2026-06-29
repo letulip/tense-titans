@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.8.3';
+const APP_VERSION = '1.8.4';
 const SCHEMA_VERSION = 6;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -111,7 +111,7 @@ function defaultStore() {
     achievements: {},      // id -> ISO date unlocked
     settings: {
       name: '', mascot: 'dragon', theme: 'default', dark: false,
-      sound: true, voiceURI: '', rate: 1, pitch: 1, dailyGoal: 10, reduceEffects: false,
+      sound: true, haptics: true, voiceURI: '', rate: 1, pitch: 1, dailyGoal: 10, reduceEffects: false,
     },
     flags: { onboarded: false, evoStage: 0, unlocked: {} },
   };
@@ -505,6 +505,9 @@ function regularize(base) {
   if (/e$/i.test(base)) return base + 'd';
   return base + 'ed';
 }
+// Verbs whose regular "-ed" form is ALSO valid English (burnt/burned, shone/shined…) — never
+// trap with the -ed form for these, or we'd mark a correct answer wrong.
+const ED_ALSO_VALID = new Set(['burn', 'learn', 'spell', 'smell', 'spoil', 'dream', 'lean', 'leap', 'kneel', 'light', 'speed', 'shine', 'broadcast']);
 
 function buildOptions(area) {
   const { v, which, answer } = session.q;
@@ -513,8 +516,8 @@ function buildOptions(area) {
   const otherForm = which === 'past' ? v.pp : v.past;
   if (otherForm && !isCorrect(otherForm, answer)) {
     opts.add(otherForm);
-  } else if (v.base === answer) {
-    // never-changing verb (cut/put/read): trap with the wrong "-ed" form (cuted, puted...)
+  } else if (!ED_ALSO_VALID.has(v.id)) {
+    // past == participle (or never-changing): trap with the wrong "-ed" form (bringed, cuted...)
     const reg = regularize(v.base);
     if (reg && !isCorrect(reg, answer)) opts.add(reg);
   }
@@ -922,7 +925,7 @@ function sfx(type) {
 }
 // Haptic feedback (Android): single buzz on correct, double on wrong.
 function haptic(ok) {
-  if (!store.settings.sound || !navigator.vibrate) return;
+  if (!store.settings.haptics || !navigator.vibrate) return;
   try { navigator.vibrate(ok ? 35 : [30, 60, 30]); } catch (e) { /* ignore */ }
 }
 
@@ -1127,6 +1130,7 @@ function renderSettings() {
   $('#set-dark').checked = !!s.dark;
   $('#set-reduce').checked = !!s.reduceEffects;
   $('#set-sound').checked = !!s.sound;
+  $('#set-haptics').checked = !!s.haptics;
   $('#set-rate').value = s.rate; $('#rate-val').textContent = '×' + s.rate;
   $('#set-pitch').value = s.pitch; $('#pitch-val').textContent = '×' + s.pitch;
   $('#set-goal').value = String(s.dailyGoal);
@@ -1366,6 +1370,7 @@ function wire() {
   $('#set-dark').onchange = (e) => { store.settings.dark = e.target.checked; applyCosmetics(); saveStore(); };
   $('#set-reduce').onchange = (e) => { store.settings.reduceEffects = e.target.checked; applyCosmetics(); saveStore(); };
   $('#set-sound').onchange = (e) => { store.settings.sound = e.target.checked; saveStore(); };
+  $('#set-haptics').onchange = (e) => { store.settings.haptics = e.target.checked; saveStore(); if (e.target.checked) haptic(true); };
   $('#set-rate').oninput = (e) => { store.settings.rate = +e.target.value; $('#rate-val').textContent = '×' + e.target.value; saveStore(); markActivePreset(); previewVoice(450); };
   $('#set-pitch').oninput = (e) => { store.settings.pitch = +e.target.value; $('#pitch-val').textContent = '×' + e.target.value; saveStore(); markActivePreset(); previewVoice(450); };
   $('#set-goal').onchange = (e) => { store.settings.dailyGoal = +e.target.value; saveStore(); };
