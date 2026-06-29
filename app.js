@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.7.2';
+const APP_VERSION = '1.8.0';
 const SCHEMA_VERSION = 6;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -89,6 +89,7 @@ const ACHIEVEMENTS = [
 /* ---------- State ---------- */
 let VERBS = [];
 let verbById = {};
+let EXAMPLES = {};            // verbId -> [baseSentence, pastSentence, ppSentence] (form in *asterisks*)
 let store = null;
 let voices = [];
 let session = null;
@@ -467,6 +468,8 @@ function renderQuestion() {
   }
   $('#feedback').textContent = '';
   $('#feedback').className = 'feedback';
+  $('#example').classList.add('hidden');
+  $('#next-btn').classList.add('hidden');
   $('#translation').classList.add('hidden');
   $('#translation').textContent = v.ru.join(', ');
   $('#translate-btn').classList.toggle('hidden', kind === 'translate'); // no hint button when translation IS the question
@@ -620,11 +623,16 @@ function handleAnswer(given, el) {
   saveStore();
 
   if (session.mode === 'speed') {
-    setTimeout(nextQuestion, ok ? 300 : 650);
+    setTimeout(nextQuestion, ok ? 300 : 650);   // timed: keep it fast, no examples
   } else {
     session.index++;
     $('#play-progress-fill').style.width = (session.index / session.total * 100) + '%';
-    setTimeout(nextQuestion, ok ? 900 : 1700);
+    // show the verb in example sentences and wait for the player to tap Next
+    renderExample(q.v);
+    const nb = $('#next-btn');
+    nb.textContent = session.index >= session.total ? 'Finish →' : 'Next →';
+    nb.classList.remove('hidden');
+    setTimeout(() => nb.focus(), 50);
   }
 }
 
@@ -640,6 +648,17 @@ function feedbackBad(el, answer) {
   f.textContent = 'Answer: ' + answer;
   f.className = 'feedback bad';
   if (el) { el.classList.add('shake', 'wrong'); setTimeout(() => el.classList.remove('shake'), 350); }
+}
+
+// Show the verb in three example sentences (base / past / participle), form highlighted.
+function boldForm(s) { return String(s).replace(/\*([^*]+)\*/g, '<b>$1</b>'); }
+function renderExample(v) {
+  const ex = EXAMPLES[v.id], el = $('#example');
+  if (!ex) { el.classList.add('hidden'); return; }
+  const labels = ['base', 'past', 'participle'];
+  el.innerHTML = `<div class="ex-title">📖 ${v.base} in sentences</div>` +
+    ex.map((s, i) => `<div class="ex-line"><span class="ex-label">${labels[i]}</span><span class="ex-sent">${boldForm(s)}</span></div>`).join('');
+  el.classList.remove('hidden');
 }
 
 // Streak + daily-goal history bookkeeping (any mode counts toward the streak).
@@ -1308,6 +1327,7 @@ function wire() {
       show('home');
     }
   };
+  $('#next-btn').onclick = () => { $('#example').classList.add('hidden'); $('#next-btn').classList.add('hidden'); nextQuestion(); };
   $('#translate-btn').onclick = () => $('#translation').classList.toggle('hidden');
   $('#speak-btn').onclick = () => { if (session && session.q) speak(session.q.v.base + '. ' + session.q.v.past + '. ' + session.q.v.pp); };
   $('#results-again').onclick = () => startSession(session ? session.mode : 'pick');
@@ -1387,6 +1407,7 @@ async function boot() {
     return;
   }
   VERBS.forEach(v => verbById[v.id] = v);
+  try { EXAMPLES = await (await fetch('examples.json')).json(); } catch (e) { EXAMPLES = {}; }  // optional; graceful if missing
   decayAll();           // apply the forgetting curve for any time away
   markUnlocks();        // grant any cosmetics already earned under the new rules
   // "Comeback Kid": flag a long absence so the next answer unlocks it
