@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.8.1';
+const APP_VERSION = '1.8.2';
 const SCHEMA_VERSION = 6;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -499,9 +499,13 @@ function renderQuestion() {
 }
 
 function buildOptions(area) {
-  const { which, answer } = session.q;
-  const others = VERBS.filter(x => x.id !== session.q.v.id).map(x => x[which]);
+  const { v, which, answer } = session.q;
   const opts = new Set([answer]);
+  // Sneaky trap: the verb's OTHER form (past<->participle), e.g. "gone" when asked for "went".
+  const otherForm = which === 'past' ? v.pp : v.past;
+  if (otherForm && !isCorrect(otherForm, answer)) opts.add(otherForm);
+  // Fill the rest with same-type forms from other verbs.
+  const others = VERBS.filter(x => x.id !== v.id).map(x => x[which]);
   while (opts.size < 4 && others.length) opts.add(others[Math.floor(Math.random() * others.length)]);
   for (const opt of shuffle(Array.from(opts))) {
     const b = document.createElement('button');
@@ -606,6 +610,7 @@ function handleAnswer(given, el) {
     feedbackBad(el, answer);
     sfx('bad');
   }
+  haptic(ok);
   speak(q.kind === 'translate' ? q.v.base : answer);   // always voice the correct answer, even on a miss
 
   const blank = $('#blank');
@@ -900,6 +905,11 @@ function sfx(type) {
       o.start(t); o.stop(t + 0.2);
     });
   } catch (e) { /* ignore */ }
+}
+// Haptic feedback (Android): single buzz on correct, double on wrong.
+function haptic(ok) {
+  if (!store.settings.sound || !navigator.vibrate) return;
+  try { navigator.vibrate(ok ? 35 : [30, 60, 30]); } catch (e) { /* ignore */ }
 }
 
 // Lightweight confetti (DOM particles, auto-removed). Visual only.
