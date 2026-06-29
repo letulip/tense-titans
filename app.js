@@ -4,8 +4,8 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.5.0';
-const SCHEMA_VERSION = 4;        // bump + add a migration when store shape changes
+const APP_VERSION = '1.7.2';
+const SCHEMA_VERSION = 6;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
 
@@ -27,24 +27,29 @@ const STAGES = [
   { key: 'mastered', emoji: '🌳', name: 'Mastered', hint: 'Both lvl 7+ via ⌨️ Type it (~1 week+)' },
   { key: 'gold',     emoji: '🌟', name: 'Champion', hint: 'Both lvl 10 — kept perfect for weeks' },
 ];
-const EVO_LEVELS = [2, 5, 9];    // mascot evolves when you reach these levels
-const EVO_NAMES = ['Egg', 'Baby', 'Grown', 'Champion'];
+// 6 illustrated evolution stages (images 1..6). Evolve every 2 levels -> stages 1..5.
+const EVO_LEVELS = [3, 5, 7, 9, 11];   // ~300 / 1500 / 6300 / 25500 / 102300 XP — a real climb
+const EVO_NAMES = ['Hatchling', 'Youngling', 'Adept', 'Warrior', 'Elder', 'Champion'];
 
 /* ---------- Catalog of cosmetics (safe to extend freely) ---------- */
+// Cosmetics unlock by MEANINGFUL milestones (req), not raw XP — see reqMet/reqText.
+// req types: {level:n} | {mastered:n} | {streak:n} | {champion:n}. No req = always free.
 const THEMES = [
-  { id: 'default', name: 'Royal',  unlockXp: 0 },
-  { id: 'ocean',   name: 'Ocean',  unlockXp: 150 },
-  { id: 'forest',  name: 'Forest', unlockXp: 350 },
-  { id: 'candy',   name: 'Candy',  unlockXp: 600 },
-  { id: 'sunset',  name: 'Sunset', unlockXp: 900 },
+  { id: 'default', name: 'Royal',  req: null },
+  { id: 'ocean',   name: 'Ocean',  req: { type: 'level',    n: 4 } },
+  { id: 'forest',  name: 'Forest', req: { type: 'streak',   n: 3 } },
+  { id: 'candy',   name: 'Candy',  req: { type: 'mastered', n: 15 } },
+  { id: 'sunset',  name: 'Sunset', req: { type: 'mastered', n: 30 } },
 ];
-// forms = evolution chain: [egg, baby, grown, champion]
+// forms = evolution chain: [baby, young, grown, champion]. The creature is always
+// visible (so picking a mascot is obvious); evolution grows its size + adds a crown.
+// img = filename prefix in images/mascots/<id>/<img>{1..6}-fs8.webp ; emoji used in settings only.
 const MASCOTS = [
-  { id: 'dragon', emoji: '🐉', name: 'Dragon',  unlockXp: 0,   forms: ['🥚', '🐲', '🐉', '🐉'] },
-  { id: 'fox',    emoji: '🦊', name: 'Fox',     unlockXp: 0,   forms: ['🥚', '🐾', '🦊', '🦊'] },
-  { id: 'owl',    emoji: '🦉', name: 'Owl',     unlockXp: 200, forms: ['🥚', '🐥', '🦉', '🦉'] },
-  { id: 'robot',  emoji: '🤖', name: 'Robot',   unlockXp: 450, forms: ['📦', '🔩', '🤖', '🤖'] },
-  { id: 'unicorn',emoji: '🦄', name: 'Unicorn', unlockXp: 750, forms: ['🥚', '🐴', '🦄', '🦄'] },
+  { id: 'dragon', emoji: '🐉', name: 'Dragon',  img: 'dragon', req: null,                       forms: ['🐲', '🐲', '🐉', '🐉'] },
+  { id: 'fox',    emoji: '🦊', name: 'Fox',     img: 'fox',    req: null,                       forms: ['🦊', '🦊', '🦊', '🦊'] },
+  { id: 'owl',    emoji: '🦉', name: 'Owl',     img: 'owl',    req: { type: 'mastered', n: 5 }, forms: ['🦉', '🦉', '🦉', '🦉'] },
+  { id: 'robot',  emoji: '🤖', name: 'Robot',   img: 'robot',  req: { type: 'level',    n: 6 }, forms: ['🤖', '🤖', '🤖', '🤖'] },
+  { id: 'unicorn',emoji: '🦄', name: 'Unicorn', img: 'uni',    req: { type: 'streak',   n: 7 }, forms: ['🐴', '🐴', '🦄', '🦄'] },
 ];
 const VOICE_PRESETS = [
   { id: 'normal',   name: 'Normal',   rate: 1.0, pitch: 1.0 },
@@ -72,7 +77,7 @@ const ACHIEVEMENTS = [
   { id: 'speed25',     ico: '🚀', name: 'Lightning',    desc: 'Score 25+ in a Speed round' },
   { id: 'combo10',     ico: '🔗', name: 'Combo master', desc: '10-answer combo in Speed' },
   { id: 'allModes',    ico: '🎮', name: 'Jack of all',  desc: 'Play all four game modes' },
-  { id: 'level10',     ico: '🎖️', name: 'Veteran',      desc: 'Reach level 10' },
+  { id: 'level10',     ico: '🎖️', name: 'Veteran',      desc: 'Reach level 7' },
   // ---- hidden ----
   { id: 'nightOwl',    ico: '🦉', name: 'Night Owl',    desc: 'Practice late at night', hidden: true },
   { id: 'earlyBird',   ico: '🐤', name: 'Early Bird',   desc: 'Practice early in the morning', hidden: true },
@@ -87,6 +92,7 @@ let verbById = {};
 let store = null;
 let voices = [];
 let session = null;
+let evoAnimPending = false;   // play the evolution pop on the next home render
 
 /* ============================================================
    Store: load / migrate / save  (backward compatible)
@@ -106,7 +112,7 @@ function defaultStore() {
       name: '', mascot: 'dragon', theme: 'default', dark: false,
       sound: true, voiceURI: '', rate: 1, pitch: 1, dailyGoal: 10, reduceEffects: false,
     },
-    flags: { onboarded: false, evoStage: 0 },
+    flags: { onboarded: false, evoStage: 0, unlocked: {} },
   };
 }
 
@@ -149,6 +155,24 @@ function migrate(s) {
       }
     }
   }
+  // v4 -> v5: cosmetics now unlock by meaningful milestones (mastery/streak/level),
+  // not raw XP. Honestly re-lock everything, but keep whatever the player is currently
+  // wearing so nothing they chose disappears. markUnlocks() later re-grants any already met.
+  if ((s.schemaVersion || 1) < 5) {
+    s.flags = s.flags || {};
+    s.flags.unlocked = {};
+    const sel = s.settings || {};
+    if (sel.mascot) s.flags.unlocked[sel.mascot] = true;
+    if (sel.theme) s.flags.unlocked[sel.theme] = true;
+    delete s._announced;   // old XP-announcement bookkeeping no longer used
+  }
+  // v5 -> v6: evolution now happens every 2 levels (steeper). Roll the saved evolution
+  // high-water mark back to whatever the player's CURRENT XP/level earns under the new
+  // thresholds, so over-evolved players climb (and re-celebrate) the stages again.
+  if ((s.schemaVersion || 1) < 6) {
+    s.flags = s.flags || {};
+    s.flags.evoStage = evoStageForLevel(levelFromXp((s.stats && s.stats.xp) || 0));
+  }
   // Always fill any newly-added default fields without dropping the player's data.
   s = fillDefaults(s, defaultStore());
   s.schemaVersion = SCHEMA_VERSION;
@@ -184,12 +208,16 @@ function saveStore() {
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const todayKey = () => new Date().toISOString().slice(0, 10);
-const levelFromXp = (xp) => 1 + Math.floor(xp / 100);
-const xpIntoLevel = (xp) => xp % 100;
+// Levels cost progressively more: level L costs 100·2^(L-1) XP, so the cumulative
+// XP to REACH level L is 100·(2^(L-1) - 1)  ->  L1=0, L2=100, L3=300, L4=700, L5=1500…
+const xpForLevel = (L) => 100 * (Math.pow(2, L - 1) - 1);
+const levelFromXp = (xp) => { let L = 1; while (xpForLevel(L + 1) <= xp) L++; return L; };
+const xpIntoLevel = (xp) => xp - xpForLevel(levelFromXp(xp));            // XP within the current level
+const xpForNextLevel = (xp) => { const L = levelFromXp(xp); return xpForLevel(L + 1) - xpForLevel(L); }; // span of current level
 // Rank titles by level (cosmetic motivator).
 const RANKS = [
-  { min: 1, name: 'Novice' }, { min: 3, name: 'Apprentice' }, { min: 5, name: 'Squire' },
-  { min: 8, name: 'Knight' }, { min: 12, name: 'Champion' }, { min: 18, name: 'Titan' },
+  { min: 1, name: 'Novice' }, { min: 2, name: 'Apprentice' }, { min: 3, name: 'Squire' },
+  { min: 4, name: 'Knight' }, { min: 6, name: 'Champion' }, { min: 8, name: 'Titan' },
 ];
 function rankTitle(level) { let t = RANKS[0].name; for (const r of RANKS) if (level >= r.min) t = r.name; return t; }
 
@@ -284,12 +312,14 @@ function evoStageForLevel(level) {
 function currentEvoStage() { return evoStageForLevel(levelFromXp(store.stats.xp)); }
 function mascotDef() { return MASCOTS.find(m => m.id === store.settings.mascot) || MASCOTS[0]; }
 function mascotFormEmoji(stage) { return mascotDef().forms[stage] || mascotDef().emoji; }
+// Path to the illustrated artwork for an evolution stage (0..5 -> image 1..6).
+function mascotImg(stage) { const m = mascotDef(); return `images/mascots/${m.id}/${m.img}${stage + 1}-fs8.webp`; }
 // XP remaining until the next evolution (or null if maxed).
 function xpToNextEvo() {
   const lvl = levelFromXp(store.stats.xp);
   const next = EVO_LEVELS.find(lv => lv > lvl);
   if (!next) return null;
-  return (next - 1) * 100 - store.stats.xp;
+  return xpForLevel(next) - store.stats.xp;
 }
 // Compare answers letters-only, so spacing / slashes / punctuation never matter.
 function lettersOnly(s) { return String(s).toLowerCase().replace(/[^a-z]+/g, ''); }
@@ -629,7 +659,7 @@ function collectRewards() {
   checkAchievements();
   const newEvo = currentEvoStage();
   let evolved = null;
-  if (newEvo > (store.flags.evoStage || 0)) { evolved = newEvo; store.flags.evoStage = newEvo; }
+  if (newEvo > (store.flags.evoStage || 0)) { evolved = newEvo; store.flags.evoStage = newEvo; evoAnimPending = true; }
   return { unlocks, evolved };
 }
 
@@ -727,7 +757,7 @@ function checkAchievements() {
   if ((st.maxCombo || 0) >= 10) unlockAchievement('combo10');
   if ((st.speedBestClean || 0) >= 15) unlockAchievement('flawlessSpd');
   if (Object.keys(st.modesPlayed || {}).length >= 4) unlockAchievement('allModes');
-  if (levelFromXp(st.xp) >= 10) unlockAchievement('level10');
+  if (levelFromXp(st.xp) >= 7) unlockAchievement('level10');
   if (hour >= 22 || hour < 5) unlockAchievement('nightOwl');
   if (hour >= 5 && hour < 8) unlockAchievement('earlyBird');
   if (store.flags && store.flags.comebackPending) unlockAchievement('comeback');
@@ -747,20 +777,47 @@ function drainAchQueue() {
     achQueue.shift(); if (achQueue.length) drainAchQueue();
   }, 2700);
 }
-// Returns names of cosmetics newly crossed the XP threshold (for the results screen).
-function checkUnlocks() {
-  const xp = store.stats.xp;
-  if (!store._announced) store._announced = {};
-  const out = [];
-  const all = [...THEMES.map(t => ({ ...t, kind: 'Theme' })),
-               ...MASCOTS.map(m => ({ ...m, kind: 'Mascot' }))];
-  for (const c of all) {
-    if (c.unlockXp > 0 && xp >= c.unlockXp && !store._announced[c.kind + c.id]) {
-      store._announced[c.kind + c.id] = true;
-      out.push(c.kind + ' ' + (c.name || c.emoji));
-    }
+/* ============================================================
+   Cosmetic unlocks (meaningful milestones, sticky once earned)
+   ============================================================ */
+function reqMet(req) {
+  if (!req) return true;
+  const st = store.stats;
+  switch (req.type) {
+    case 'level':    return levelFromXp(st.xp) >= req.n;
+    case 'mastered': return masteredCount() >= req.n;
+    case 'streak':   return st.bestStreak >= req.n;   // best ever, so it never re-locks
+    case 'champion': return championCount() >= req.n;
+    default:         return true;
   }
-  return out;
+}
+function reqText(req) {
+  if (!req) return '';
+  switch (req.type) {
+    case 'level':    return 'Reach level ' + req.n;
+    case 'mastered': return 'Master ' + req.n + ' verbs 🌳';
+    case 'streak':   return req.n + '-day streak 🔥';
+    case 'champion': return req.n + ' Champion verb 🌟';
+    default:         return '';
+  }
+}
+function unlockedMap() { if (!store.flags.unlocked) store.flags.unlocked = {}; return store.flags.unlocked; }
+function isUnlocked(c) { return !c.req || !!unlockedMap()[c.id] || reqMet(c.req); }
+function cosmeticList() {
+  return [...THEMES.map(t => ({ ...t, kind: 'Theme' })), ...MASCOTS.map(m => ({ ...m, kind: 'Mascot' }))];
+}
+// Flag any newly-earned cosmetics (sticky) and return them for announcement.
+function markUnlocks() {
+  const u = unlockedMap(), newly = [];
+  for (const c of cosmeticList()) {
+    if (c.req && !u[c.id] && reqMet(c.req)) { u[c.id] = true; newly.push(c); }
+  }
+  if (newly.length) saveStore();
+  return newly;
+}
+// Names of cosmetics newly unlocked this session (for the results screen).
+function checkUnlocks() {
+  return markUnlocks().map(c => c.kind + ' ' + (c.name || c.emoji));
 }
 
 /* ============================================================
@@ -784,6 +841,20 @@ function speak(text) {
     speechSynthesis.speak(u);
   } catch (e) { /* ignore */ }
 }
+// Speak a short sample with the CURRENT voice/rate/pitch (so settings give feedback).
+let voicePreviewTimer = null;
+function previewVoice(delay = 0) {
+  clearTimeout(voicePreviewTimer);
+  voicePreviewTimer = setTimeout(() => speak('Go, went, gone'), delay);
+}
+// Highlight the preset whose rate+pitch matches the current settings (if any).
+function markActivePreset() {
+  $$('#preset-row .preset-opt').forEach(b => {
+    const p = VOICE_PRESETS.find(x => x.id === b.dataset.preset);
+    b.classList.toggle('active', !!p && store.settings.rate === p.rate && store.settings.pitch === p.pitch);
+  });
+}
+
 // tiny WebAudio note sequences so we don't ship sound files
 let audioCtx = null;
 const SFX = {
@@ -856,18 +927,27 @@ function renderHome() {
   const s = store.settings, st = store.stats;
   const stage = currentEvoStage();
   const mEl = $('#home-mascot');
-  mEl.textContent = mascotFormEmoji(stage);
-  mEl.className = 'mascot evo-' + stage;            // CSS grows the glyph per stage
-  mEl.classList.toggle('champion', stage === 3);
+  const src = mascotImg(stage);
+  mEl.className = 'mascot-banner';
+  mEl.innerHTML = `<img class="mascot-img" src="${src}" alt="${mascotDef().name}" />`;
+  // graceful fallback to the emoji if the artwork can't load (e.g. offline & uncached)
+  mEl.firstChild.onerror = () => { mEl.classList.add('emoji-fallback'); mEl.textContent = mascotDef().emoji; };
+  mEl.onclick = () => openLightbox(src, `${mascotDef().name} · ${EVO_NAMES[stage]}`);
+  if (evoAnimPending && !reduceMotion()) {   // just evolved -> pop the new artwork in
+    evoAnimPending = false;
+    void mEl.offsetWidth; mEl.classList.add('evolve-in');
+    setTimeout(() => mEl.classList.remove('evolve-in'), 800);
+  }
   $('#home-hello').textContent = s.name ? `Hey, ${s.name}!` : 'Hey, hero!';
   $('#home-sub').textContent = homeMood();
   $('#home-evo').textContent = evoCaption();
   $('#home-streak').textContent = st.dayStreak;
   $('#home-level').textContent = levelFromXp(st.xp);
   $('#home-mastered').textContent = masteredCount();
-  $('#home-xpfill').style.width = xpIntoLevel(st.xp) + '%';
+  const into = xpIntoLevel(st.xp), span = xpForNextLevel(st.xp);
+  $('#home-xpfill').style.width = Math.min(100, into / span * 100) + '%';
   $('#home-xptext').textContent = st.xp + ' XP';
-  $('#home-xpnext').textContent = 'Lv ' + (levelFromXp(st.xp) + 1) + ' in ' + (100 - xpIntoLevel(st.xp)) + ' XP';
+  $('#home-xpnext').textContent = 'Lv ' + (levelFromXp(st.xp) + 1) + ' in ' + (span - into) + ' XP';
   $('#home-rank').textContent = rankTitle(levelFromXp(st.xp));
   const doneToday = st.history[todayKey()] || 0;
   const goal = s.dailyGoal || 10;
@@ -993,7 +1073,8 @@ function renderAchievements() {
 }
 
 function renderSettings() {
-  const s = store.settings, xp = store.stats.xp;
+  const s = store.settings;
+  markUnlocks();   // flag anything just earned so the pickers are current
   $('#set-name').value = s.name || '';
   $('#set-dark').checked = !!s.dark;
   $('#set-reduce').checked = !!s.reduceEffects;
@@ -1006,35 +1087,40 @@ function renderSettings() {
   // mascots
   const mp = $('#mascot-picker'); mp.innerHTML = '';
   MASCOTS.forEach(m => {
-    const locked = xp < m.unlockXp;
+    const unlocked = isUnlocked(m);
     const b = document.createElement('button');
-    b.className = 'mascot-opt' + (s.mascot === m.id ? ' active' : '') + (locked ? ' locked' : '');
-    b.textContent = locked ? '🔒' : m.emoji;
-    b.title = locked ? `Unlock at ${m.unlockXp} XP` : m.id;
-    if (!locked) b.onclick = () => { s.mascot = m.id; saveStore(); renderSettings(); };
+    b.className = 'mascot-opt' + (s.mascot === m.id ? ' active' : '') + (unlocked ? '' : ' locked');
+    b.textContent = unlocked ? m.emoji : '🔒';
+    b.title = unlocked ? m.name : `${m.name} — ${reqText(m.req)}`;
+    b.onclick = unlocked
+      ? () => { s.mascot = m.id; saveStore(); renderSettings(); }
+      : () => toast(`🔒 ${m.emoji} ${m.name} — ${reqText(m.req)}`);
     mp.appendChild(b);
   });
   // themes
   const tp = $('#theme-picker'); tp.innerHTML = '';
   THEMES.forEach(t => {
-    const locked = xp < t.unlockXp;
+    const unlocked = isUnlocked(t);
     const b = document.createElement('button');
-    b.className = 'theme-dot' + (s.theme === t.id ? ' active' : '') + (locked ? ' locked' : '');
+    b.className = 'theme-dot' + (s.theme === t.id ? ' active' : '') + (unlocked ? '' : ' locked');
     b.setAttribute('data-theme', t.id);
     b.style.background = themeSwatch(t.id);
-    b.title = locked ? `${t.name} — unlock at ${t.unlockXp} XP` : t.name;
-    if (!locked) b.onclick = () => { s.theme = t.id; saveStore(); applyCosmetics(); renderSettings(); };
+    b.title = unlocked ? t.name : `${t.name} — ${reqText(t.req)}`;
+    b.onclick = unlocked
+      ? () => { s.theme = t.id; saveStore(); applyCosmetics(); renderSettings(); }
+      : () => toast(`🔒 ${t.name} theme — ${reqText(t.req)}`);
     tp.appendChild(b);
   });
   // voice presets
   const pr = $('#preset-row'); pr.innerHTML = '';
   VOICE_PRESETS.forEach(p => {
     const b = document.createElement('button');
-    b.className = 'preset-opt';
+    b.className = 'preset-opt' + (s.rate === p.rate && s.pitch === p.pitch ? ' active' : '');
+    b.dataset.preset = p.id;
     b.textContent = p.name;
     b.onclick = () => {
       s.rate = p.rate; s.pitch = p.pitch; saveStore(); renderSettings();
-      speak('I sound like this');
+      previewVoice();
     };
     pr.appendChild(b);
   });
@@ -1087,6 +1173,13 @@ function openModal(title, html) {
 }
 function closeModal() { $('#modal').classList.add('hidden'); }
 
+function openLightbox(src, caption) {
+  $('#lightbox-img').src = src;
+  $('#lightbox').querySelector('.lb-cap').textContent = caption || 'tap to close';
+  $('#lightbox').classList.remove('hidden');
+}
+function closeLightbox() { $('#lightbox').classList.add('hidden'); $('#lightbox-img').src = ''; }
+
 /* ============================================================
    Onboarding (first launch)
    ============================================================ */
@@ -1109,11 +1202,11 @@ function onbSteps() {
     },
     { // mascot
       html: `<h2>Choose your buddy</h2>
-        <p>It hatches from an egg and evolves as you level up! 🥚→🐲→🐉</p>
+        <p>It grows up and earns a crown as you level up! 🐲→🐉→👑</p>
         <div class="onb-mascots">${MASCOTS.map(m => {
-          const locked = store.stats.xp < m.unlockXp;
+          const locked = !isUnlocked(m);
           return `<button class="onb-mascot-opt${onb.mascot === m.id ? ' active' : ''}${locked ? ' locked' : ''}" data-m="${m.id}" ${locked ? 'disabled' : ''}>
-            <span class="om-emoji">${locked ? '🔒' : adult(m)}</span><span class="om-name">${locked ? m.unlockXp + ' XP' : m.name}</span></button>`;
+            <span class="om-emoji">${locked ? '🔒' : adult(m)}</span><span class="om-name">${locked ? reqText(m.req) : m.name}</span></button>`;
         }).join('')}</div>`,
       next: 'Next',
     },
@@ -1121,7 +1214,7 @@ function onbSteps() {
       html: `<div class="onb-mascot">${adult(mascotById(onb.mascot))}</div>
         <h2>What's your name?</h2>
         <p>So your buddy knows who the hero is.</p>
-        <input id="onb-name" class="onb-input" type="text" maxlength="16" placeholder="hero" value="${escapeAttr(onb.name)}">`,
+        <input id="onb-name" class="onb-input" type="text" maxlength="12" placeholder="hero" value="${escapeAttr(onb.name)}">`,
       next: 'Next',
     },
     { // voice
@@ -1224,10 +1317,10 @@ function wire() {
   $('#set-dark').onchange = (e) => { store.settings.dark = e.target.checked; applyCosmetics(); saveStore(); };
   $('#set-reduce').onchange = (e) => { store.settings.reduceEffects = e.target.checked; applyCosmetics(); saveStore(); };
   $('#set-sound').onchange = (e) => { store.settings.sound = e.target.checked; saveStore(); };
-  $('#set-rate').oninput = (e) => { store.settings.rate = +e.target.value; $('#rate-val').textContent = '×' + e.target.value; saveStore(); };
-  $('#set-pitch').oninput = (e) => { store.settings.pitch = +e.target.value; $('#pitch-val').textContent = '×' + e.target.value; saveStore(); };
+  $('#set-rate').oninput = (e) => { store.settings.rate = +e.target.value; $('#rate-val').textContent = '×' + e.target.value; saveStore(); markActivePreset(); previewVoice(450); };
+  $('#set-pitch').oninput = (e) => { store.settings.pitch = +e.target.value; $('#pitch-val').textContent = '×' + e.target.value; saveStore(); markActivePreset(); previewVoice(450); };
   $('#set-goal').onchange = (e) => { store.settings.dailyGoal = +e.target.value; saveStore(); };
-  $('#set-voice').onchange = (e) => { store.settings.voiceURI = e.target.value; saveStore(); };
+  $('#set-voice').onchange = (e) => { store.settings.voiceURI = e.target.value; saveStore(); previewVoice(); };
   $('#test-voice').onclick = () => speak('Hello! Go, went, gone.');
 
   $('#reset-btn').onclick = () => {
@@ -1248,6 +1341,7 @@ function wire() {
   $('#trouble-practice').onclick = () => { const q = troubleList().map(v => ({ v })); if (q.length) startSession('trouble', q); };
   $('#modal-close').onclick = closeModal;
   $('#modal').onclick = (e) => { if (e.target.id === 'modal') closeModal(); };
+  $('#lightbox').onclick = closeLightbox;
 
   if (window.speechSynthesis) {
     loadVoices();
@@ -1294,6 +1388,7 @@ async function boot() {
   }
   VERBS.forEach(v => verbById[v.id] = v);
   decayAll();           // apply the forgetting curve for any time away
+  markUnlocks();        // grant any cosmetics already earned under the new rules
   // "Comeback Kid": flag a long absence so the next answer unlocks it
   const last = store.stats.lastStudyDate;
   if (last && (Date.now() - new Date(last).getTime()) / DAY >= 7) store.flags.comebackPending = true;
