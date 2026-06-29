@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.8.5';
 const SCHEMA_VERSION = 6;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -111,7 +111,7 @@ function defaultStore() {
     achievements: {},      // id -> ISO date unlocked
     settings: {
       name: '', mascot: 'dragon', theme: 'default', dark: false,
-      sound: true, voiceURI: '', rate: 1, pitch: 1, dailyGoal: 10, reduceEffects: false,
+      sound: true, haptics: true, voiceURI: '', rate: 1, pitch: 1, dailyGoal: 10, reduceEffects: false,
     },
     flags: { onboarded: false, evoStage: 0, unlocked: {} },
   };
@@ -303,6 +303,7 @@ function troubleList(n = 10) {
     .sort((a, b) => troubleScore(b) - troubleScore(a))
     .slice(0, n);
 }
+function troubleCount() { return VERBS.filter(v => troubleScore(v) > 0).length; }
 
 // ---- Mascot evolution (Tamagotchi-style, driven by level) ----
 function evoStageForLevel(level) {
@@ -497,10 +498,32 @@ function renderQuestion() {
   else buildOptions(area);              // pick, speed, trouble -> multiple choice
 }
 
+// A naive over-regularized form (cut -> cuted) — a realistic learner mistake. Kept naive (no
+// consonant doubling) on purpose, so it can't accidentally match a real form like "quitted"/"wedded".
+function regularize(base) {
+  if (/[^aeiou]y$/i.test(base)) return base.slice(0, -1) + 'ied';
+  if (/e$/i.test(base)) return base + 'd';
+  return base + 'ed';
+}
+// The clean -t/-ed pairs (burn, learn, spell…) now carry BOTH forms in verbs.json ("burnt/burned"),
+// so isCorrect accepts either and the -ed distractor is auto-rejected. This set is only the verbs
+// whose -ed form is valid but rarer/sense-specific (kept single-form), so we skip the -ed trap there.
+const ED_ALSO_VALID = new Set(['kneel', 'light', 'speed', 'shine', 'broadcast']);
+
 function buildOptions(area) {
-  const { which, answer } = session.q;
-  const others = VERBS.filter(x => x.id !== session.q.v.id).map(x => x[which]);
+  const { v, which, answer } = session.q;
   const opts = new Set([answer]);
+  // Sneaky trap: the verb's OTHER form (past<->participle), e.g. "gone" when asked for "went".
+  const otherForm = which === 'past' ? v.pp : v.past;
+  if (otherForm && !isCorrect(otherForm, answer)) {
+    opts.add(otherForm);
+  } else if (!ED_ALSO_VALID.has(v.id)) {
+    // past == participle (or never-changing): trap with the wrong "-ed" form (bringed, cuted...)
+    const reg = regularize(v.base);
+    if (reg && !isCorrect(reg, answer)) opts.add(reg);
+  }
+  // Fill the rest with same-type forms from other verbs.
+  const others = VERBS.filter(x => x.id !== v.id).map(x => x[which]);
   while (opts.size < 4 && others.length) opts.add(others[Math.floor(Math.random() * others.length)]);
   for (const opt of shuffle(Array.from(opts))) {
     const b = document.createElement('button');
@@ -566,7 +589,7 @@ function handleAnswer(given, el) {
     if (ok) {
       f.correct++;
       if (recall) store.stats.typeCorrect++;
-      addXp(recall ? 15 : 10);
+      addXp(recall || session.mode === 'trouble' ? 15 : 10);   // fixing mistakes pays a bonus
       const modeCap = recall ? FORM_MAX : PICK_FORM_CAP;
       if (f.lvl >= modeCap) {
         hint = !recall ? 'Switch to ⌨️ Type it to level up!' : '';
@@ -601,11 +624,12 @@ function handleAnswer(given, el) {
     sfx(session.mode === 'speed' && session.combo >= 3 ? 'combo' : 'good');
     confettiBurst(session.combo >= 5 ? 22 : 12);
     if (session.mode === 'speed' && session.combo >= 3) showCombo(session.combo);
-    speak(q.kind === 'translate' ? q.v.base : answer);
   } else {
     feedbackBad(el, answer);
     sfx('bad');
   }
+  haptic(ok);
+  speak(q.kind === 'translate' ? q.v.base : answer);   // always voice the correct answer, even on a miss
 
   const blank = $('#blank');
   if (blank) { blank.textContent = answer; blank.classList.add('filled'); if (!ok) blank.classList.add('wrong'); }
@@ -900,6 +924,11 @@ function sfx(type) {
     });
   } catch (e) { /* ignore */ }
 }
+// Haptic feedback (Android): single buzz on correct, double on wrong.
+function haptic(ok) {
+  if (!store.settings.haptics || !navigator.vibrate) return;
+  try { navigator.vibrate(ok ? 35 : [30, 60, 30]); } catch (e) { /* ignore */ }
+}
 
 // Lightweight confetti (DOM particles, auto-removed). Visual only.
 function confettiBurst(n = 14) {
@@ -978,6 +1007,10 @@ function renderHome() {
   banner.classList.toggle('hidden', due === 0);
   $('#review-caughtup').classList.toggle('hidden', due > 0);
   if (due > 0) $('#review-count').textContent = due;
+  // Trouble-spots banner at the bottom: the verbs being missed most
+  const tc = troubleCount();
+  $('#trouble-banner').classList.toggle('hidden', tc === 0);
+  if (tc > 0) $('#trouble-count').textContent = tc;
 }
 
 // Mascot speech bubble — reacts to streak / daily goal.
@@ -1098,6 +1131,7 @@ function renderSettings() {
   $('#set-dark').checked = !!s.dark;
   $('#set-reduce').checked = !!s.reduceEffects;
   $('#set-sound').checked = !!s.sound;
+  $('#set-haptics').checked = !!s.haptics;
   $('#set-rate').value = s.rate; $('#rate-val').textContent = '×' + s.rate;
   $('#set-pitch').value = s.pitch; $('#pitch-val').textContent = '×' + s.pitch;
   $('#set-goal').value = String(s.dailyGoal);
@@ -1337,6 +1371,7 @@ function wire() {
   $('#set-dark').onchange = (e) => { store.settings.dark = e.target.checked; applyCosmetics(); saveStore(); };
   $('#set-reduce').onchange = (e) => { store.settings.reduceEffects = e.target.checked; applyCosmetics(); saveStore(); };
   $('#set-sound').onchange = (e) => { store.settings.sound = e.target.checked; saveStore(); };
+  $('#set-haptics').onchange = (e) => { store.settings.haptics = e.target.checked; saveStore(); if (e.target.checked) haptic(true); };
   $('#set-rate').oninput = (e) => { store.settings.rate = +e.target.value; $('#rate-val').textContent = '×' + e.target.value; saveStore(); markActivePreset(); previewVoice(450); };
   $('#set-pitch').oninput = (e) => { store.settings.pitch = +e.target.value; $('#pitch-val').textContent = '×' + e.target.value; saveStore(); markActivePreset(); previewVoice(450); };
   $('#set-goal').onchange = (e) => { store.settings.dailyGoal = +e.target.value; saveStore(); };
@@ -1358,7 +1393,9 @@ function wire() {
   $('#onb-back').onclick = onbBack;
   $('#onb-skip').onclick = finishOnboarding;
   $('#how-btn').onclick = () => openModal('How to play', howToPlayHTML());
-  $('#trouble-practice').onclick = () => { const q = troubleList().map(v => ({ v })); if (q.length) startSession('trouble', q); };
+  const startTrouble = () => { const q = troubleList().map(v => ({ v })); if (q.length) startSession('trouble', q); };
+  $('#trouble-practice').onclick = startTrouble;
+  $('#trouble-banner').onclick = startTrouble;
   $('#modal-close').onclick = closeModal;
   $('#modal').onclick = (e) => { if (e.target.id === 'modal') closeModal(); };
   $('#lightbox').onclick = closeLightbox;

@@ -88,6 +88,12 @@
         <button class="ghost-btn" data-go="stats">📊 Stats</button>
         <button class="ghost-btn" data-go="achievements">🏆 Achievements</button>
       </div>
+
+      <button class="trouble-banner hidden" id="trouble-banner">
+        <span class="tb-ico">🛠️</span>
+        <span class="tb-text"><b id="trouble-count">0</b> tricky verbs to fix <small>+50% XP</small></span>
+        <span class="tb-go">Fix them →</span>
+      </button>
     </section>
 
     <!-- PLAY -->
@@ -212,6 +218,10 @@
         <label class="field switch-field">
           <span>Sound effects</span>
           <input type="checkbox" id="set-sound" class="switch" />
+        </label>
+        <label class="field switch-field">
+          <span>Vibration <small>buzz on answers</small></span>
+          <input type="checkbox" id="set-haptics" class="switch" />
         </label>
         <label class="field">
           <span>Voice</span>
