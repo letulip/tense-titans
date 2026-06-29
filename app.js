@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.4.2';
+const APP_VERSION = '1.4.3';
 const SCHEMA_VERSION = 4;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -1001,7 +1001,7 @@ function onbSteps() {
   const adult = (m) => m.forms[2];
   return [
     { // welcome
-      html: `<div class="onb-mascot">🥚</div>
+      html: `<img class="onb-logo" src="icons/logo.svg" alt="Tense Titans" />
         <h2>Welcome to Tense Titans!</h2>
         <p>Master English irregular verbs by playing. Let's set up your buddy — it takes 20 seconds.</p>`,
       next: 'Let\'s go',

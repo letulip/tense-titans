@@ -269,6 +269,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .onb-body h2 { margin: 10px 0 6px; }
 .onb-body p { color: var(--muted); margin: 0 0 16px; }
 .onb-mascot { font-size: 66px; animation: bob 3s ease-in-out infinite; }
+.onb-logo { width: 104px; height: 104px; border-radius: 24px; display: block; margin: 0 auto 6px; box-shadow: var(--shadow); animation: bob 3s ease-in-out infinite; }
 .onb-input { width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 12px; padding: 13px; font-size: 17px; text-align: center; }
 .onb-mascots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .onb-mascot-opt { background: var(--surface); border: 2px solid var(--border); border-radius: 14px; padding: 12px 6px; cursor: pointer; color: var(--text); display: flex; flex-direction: column; gap: 4px; align-items: center; }
