@@ -69,11 +69,12 @@ body {
 .stat-row { display: flex; gap: 10px; margin-bottom: 14px; }
 .chip {
   flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 12px; text-align: center; display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 10px; text-align: center; display: flex; flex-wrap: wrap;
+  align-items: baseline; justify-content: center; gap: 2px 6px;
 }
-.chip-ico { font-size: 20px; }
+.chip-ico { font-size: 18px; }
 .chip b { font-size: 20px; }
-.chip small { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+.chip small { flex-basis: 100%; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
 
 .xpbar-wrap { margin: 4px 2px 16px; }
 .xpbar { height: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 99px; overflow: hidden; }
@@ -367,7 +368,6 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .review-banner .rb-text { flex: 1; text-align: left; font-weight: 600; }
 .review-banner .rb-text b { font-size: 20px; }
 .review-banner .rb-go { font-weight: 800; background: rgba(255,255,255,.22); padding: 6px 12px; border-radius: 99px; font-size: 14px; }
-.review-caughtup { text-align: center; color: var(--muted); font-size: 14px; margin-bottom: 16px; }
 
 /* trouble-spots banner at the very bottom of home */
 .trouble-banner {
