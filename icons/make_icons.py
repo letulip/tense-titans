@@ -1,11 +1,10 @@
-"""Regenerate Tense Titans PNG icons from the SVG masters.
+"""Regenerate every Tense Titans icon from the single master SVG.
 
-Sources of truth:
-  logo.svg           -> favicon + "any" app icons (rounded corners)
-  logo-maskable.svg  -> maskable icon + apple-touch (full-bleed background)
+Source of truth:  logo.svg  (full-bleed two-swords "TT" mark)
 
-Rasterises with macOS `qlmanage` (Quick Look), then resizes to exact sizes
-with Pillow. macOS-only (no rsvg/cairosvg/inkscape needed).
+The design is full-bleed (background reaches the edges), so the same artwork
+works for normal, maskable and apple-touch icons. Rasterised with macOS
+`qlmanage` (Quick Look) + Pillow for exact sizes. macOS-only.
 
     python3 icons/make_icons.py
 """
@@ -13,6 +12,7 @@ import os, subprocess, tempfile
 from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+MASTER = os.path.join(HERE, "logo.svg")
 
 
 def rasterize(svg, px=512):
@@ -28,14 +28,13 @@ def save(img, size, name):
 
 
 def main():
-    rounded = rasterize(os.path.join(HERE, "logo.svg"), 512)
-    masked = rasterize(os.path.join(HERE, "logo-maskable.svg"), 512)
-    save(rounded, 512, "icon-512.png")
-    save(rounded, 192, "icon-192.png")
-    save(rounded, 32, "favicon-32.png")
-    save(masked, 512, "icon-maskable-512.png")
-    save(masked, 180, "apple-touch-icon.png")
-    print("icons regenerated in", HERE)
+    base = rasterize(MASTER, 512)
+    save(base, 512, "icon-512.png")
+    save(base, 512, "icon-maskable-512.png")
+    save(base, 192, "icon-192.png")
+    save(base, 180, "apple-touch-icon.png")
+    save(base, 32, "favicon-32.png")
+    print("icons regenerated from logo.svg in", HERE)
 
 
 if __name__ == "__main__":
