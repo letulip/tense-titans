@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.4.3';
+const APP_VERSION = '1.5.0';
 const SCHEMA_VERSION = 4;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -104,7 +104,7 @@ function defaultStore() {
     achievements: {},      // id -> ISO date unlocked
     settings: {
       name: '', mascot: 'dragon', theme: 'default', dark: false,
-      sound: true, voiceURI: '', rate: 1, pitch: 1, dailyGoal: 10,
+      sound: true, voiceURI: '', rate: 1, pitch: 1, dailyGoal: 10, reduceEffects: false,
     },
     flags: { onboarded: false, evoStage: 0 },
   };
@@ -813,6 +813,7 @@ function sfx(type) {
 
 // Lightweight confetti (DOM particles, auto-removed). Visual only.
 function confettiBurst(n = 14) {
+  if (reduceMotion()) return;
   const root = $('#confetti'); if (!root) return;
   const colors = ['#ffd166', '#6c5ce7', '#2ecc71', '#ff6b6b', '#a29bfe', '#00b3c4'];
   for (let i = 0; i < n; i++) {
@@ -839,9 +840,14 @@ function showCombo(n) {
 /* ============================================================
    Rendering: home / stats / achievements / settings
    ============================================================ */
+function reduceMotion() {
+  return !!store.settings.reduceEffects ||
+    (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
 function applyCosmetics() {
   document.documentElement.setAttribute('data-theme', store.settings.theme || 'default');
   document.documentElement.setAttribute('data-dark', store.settings.dark ? 'true' : 'false');
+  document.documentElement.setAttribute('data-reduce', reduceMotion() ? 'true' : 'false');
 }
 
 function renderHome() {
@@ -893,6 +899,32 @@ function evoCaption() {
   return `✨ ${toNext} XP to evolve your ${mascotDef().name}`;
 }
 
+// GitHub-style activity heatmap of the last 12 weeks from stats.history.
+function actLevel(c) { if (!c) return 0; if (c >= 20) return 4; if (c >= 10) return 3; if (c >= 5) return 2; return 1; }
+function renderActivity() {
+  const st = store.stats;
+  $('#activity-streaks').innerHTML =
+    `<span>🔥 Current <b>${st.dayStreak}</b></span><span>🏆 Best <b>${st.bestStreak}</b></span>`;
+  const weeks = 12, total = weeks * 7;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const oldest = new Date(today.getTime() - (total - 1) * DAY);
+  const padStart = (oldest.getDay() + 6) % 7;   // weekday with Monday = 0
+  const grid = [];
+  let week = new Array(padStart).fill(null);
+  for (let i = total - 1; i >= 0; i--) {
+    const d = new Date(today.getTime() - i * DAY);
+    const key = d.toISOString().slice(0, 10);
+    week.push({ key, count: st.history[key] || 0, isToday: i === 0 });
+    if (week.length === 7) { grid.push(week); week = []; }
+  }
+  if (week.length) { while (week.length < 7) week.push(null); grid.push(week); }
+  $('#activity-grid').innerHTML = grid.map(col =>
+    `<div class="act-week">${col.map(cell => cell
+      ? `<span class="act act-${actLevel(cell.count)}${cell.isToday ? ' today' : ''}" title="${cell.key}: ${cell.count}"></span>`
+      : `<span class="act empty"></span>`).join('')}</div>`
+  ).join('');
+}
+
 function renderStats() {
   const st = store.stats;
   decayAll();
@@ -904,6 +936,8 @@ function renderStats() {
     <div class="box"><b>${inProgress}</b><small>growing 🌿</small></div>
     <div class="box"><b>${acc}%</b><small>accuracy</small></div>
     <div class="box"><b>${due}</b><small>due now 🔔</small></div>`;
+
+  renderActivity();
 
   // Legend: explain the stages and how to advance.
   $('#stats-legend').innerHTML = STAGES.map(s =>
@@ -962,6 +996,7 @@ function renderSettings() {
   const s = store.settings, xp = store.stats.xp;
   $('#set-name').value = s.name || '';
   $('#set-dark').checked = !!s.dark;
+  $('#set-reduce').checked = !!s.reduceEffects;
   $('#set-sound').checked = !!s.sound;
   $('#set-rate').value = s.rate; $('#rate-val').textContent = '×' + s.rate;
   $('#set-pitch').value = s.pitch; $('#pitch-val').textContent = '×' + s.pitch;
@@ -1187,6 +1222,7 @@ function wire() {
   // settings inputs
   $('#set-name').oninput = (e) => { store.settings.name = e.target.value; saveStore(); };
   $('#set-dark').onchange = (e) => { store.settings.dark = e.target.checked; applyCosmetics(); saveStore(); };
+  $('#set-reduce').onchange = (e) => { store.settings.reduceEffects = e.target.checked; applyCosmetics(); saveStore(); };
   $('#set-sound').onchange = (e) => { store.settings.sound = e.target.checked; saveStore(); };
   $('#set-rate').oninput = (e) => { store.settings.rate = +e.target.value; $('#rate-val').textContent = '×' + e.target.value; saveStore(); };
   $('#set-pitch').oninput = (e) => { store.settings.pitch = +e.target.value; $('#pitch-val').textContent = '×' + e.target.value; saveStore(); };
