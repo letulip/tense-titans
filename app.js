@@ -4,8 +4,8 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.7.1';
-const SCHEMA_VERSION = 5;        // bump + add a migration when store shape changes
+const APP_VERSION = '1.7.2';
+const SCHEMA_VERSION = 6;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
 
@@ -27,8 +27,8 @@ const STAGES = [
   { key: 'mastered', emoji: '🌳', name: 'Mastered', hint: 'Both lvl 7+ via ⌨️ Type it (~1 week+)' },
   { key: 'gold',     emoji: '🌟', name: 'Champion', hint: 'Both lvl 10 — kept perfect for weeks' },
 ];
-// 6 illustrated evolution stages (images 1..6). Evolve at these levels -> stages 1..5.
-const EVO_LEVELS = [2, 3, 4, 5, 6];   // ~100 / 300 / 700 / 1500 / 3100 XP
+// 6 illustrated evolution stages (images 1..6). Evolve every 2 levels -> stages 1..5.
+const EVO_LEVELS = [3, 5, 7, 9, 11];   // ~300 / 1500 / 6300 / 25500 / 102300 XP — a real climb
 const EVO_NAMES = ['Hatchling', 'Youngling', 'Adept', 'Warrior', 'Elder', 'Champion'];
 
 /* ---------- Catalog of cosmetics (safe to extend freely) ---------- */
@@ -165,6 +165,13 @@ function migrate(s) {
     if (sel.mascot) s.flags.unlocked[sel.mascot] = true;
     if (sel.theme) s.flags.unlocked[sel.theme] = true;
     delete s._announced;   // old XP-announcement bookkeeping no longer used
+  }
+  // v5 -> v6: evolution now happens every 2 levels (steeper). Roll the saved evolution
+  // high-water mark back to whatever the player's CURRENT XP/level earns under the new
+  // thresholds, so over-evolved players climb (and re-celebrate) the stages again.
+  if ((s.schemaVersion || 1) < 6) {
+    s.flags = s.flags || {};
+    s.flags.evoStage = evoStageForLevel(levelFromXp((s.stats && s.stats.xp) || 0));
   }
   // Always fill any newly-added default fields without dropping the player's data.
   s = fillDefaults(s, defaultStore());
