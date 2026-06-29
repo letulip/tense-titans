@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.6.1';
 const SCHEMA_VERSION = 5;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -27,7 +27,7 @@ const STAGES = [
   { key: 'mastered', emoji: '🌳', name: 'Mastered', hint: 'Both lvl 7+ via ⌨️ Type it (~1 week+)' },
   { key: 'gold',     emoji: '🌟', name: 'Champion', hint: 'Both lvl 10 — kept perfect for weeks' },
 ];
-const EVO_LEVELS = [2, 5, 9];    // mascot evolves when you reach these levels
+const EVO_LEVELS = [2, 4, 6];    // mascot evolves at these levels (~100 / 700 / 3100 XP)
 const EVO_NAMES = ['Baby', 'Young', 'Grown', 'Champion'];
 
 /* ---------- Catalog of cosmetics (safe to extend freely) ---------- */
@@ -46,7 +46,7 @@ const MASCOTS = [
   { id: 'dragon', emoji: '🐉', name: 'Dragon',  req: null,                    forms: ['🐲', '🐲', '🐉', '🐉'] },
   { id: 'fox',    emoji: '🦊', name: 'Fox',     req: null,                    forms: ['🦊', '🦊', '🦊', '🦊'] },
   { id: 'owl',    emoji: '🦉', name: 'Owl',     req: { type: 'mastered', n: 5 },  forms: ['🦉', '🦉', '🦉', '🦉'] },
-  { id: 'robot',  emoji: '🤖', name: 'Robot',   req: { type: 'level',    n: 10 }, forms: ['🤖', '🤖', '🤖', '🤖'] },
+  { id: 'robot',  emoji: '🤖', name: 'Robot',   req: { type: 'level',    n: 6 },  forms: ['🤖', '🤖', '🤖', '🤖'] },
   { id: 'unicorn',emoji: '🦄', name: 'Unicorn', req: { type: 'streak',   n: 7 },  forms: ['🐴', '🐴', '🦄', '🦄'] },
 ];
 const VOICE_PRESETS = [
@@ -75,7 +75,7 @@ const ACHIEVEMENTS = [
   { id: 'speed25',     ico: '🚀', name: 'Lightning',    desc: 'Score 25+ in a Speed round' },
   { id: 'combo10',     ico: '🔗', name: 'Combo master', desc: '10-answer combo in Speed' },
   { id: 'allModes',    ico: '🎮', name: 'Jack of all',  desc: 'Play all four game modes' },
-  { id: 'level10',     ico: '🎖️', name: 'Veteran',      desc: 'Reach level 10' },
+  { id: 'level10',     ico: '🎖️', name: 'Veteran',      desc: 'Reach level 7' },
   // ---- hidden ----
   { id: 'nightOwl',    ico: '🦉', name: 'Night Owl',    desc: 'Practice late at night', hidden: true },
   { id: 'earlyBird',   ico: '🐤', name: 'Early Bird',   desc: 'Practice early in the morning', hidden: true },
@@ -198,12 +198,16 @@ function saveStore() {
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const todayKey = () => new Date().toISOString().slice(0, 10);
-const levelFromXp = (xp) => 1 + Math.floor(xp / 100);
-const xpIntoLevel = (xp) => xp % 100;
+// Levels cost progressively more: level L costs 100·2^(L-1) XP, so the cumulative
+// XP to REACH level L is 100·(2^(L-1) - 1)  ->  L1=0, L2=100, L3=300, L4=700, L5=1500…
+const xpForLevel = (L) => 100 * (Math.pow(2, L - 1) - 1);
+const levelFromXp = (xp) => { let L = 1; while (xpForLevel(L + 1) <= xp) L++; return L; };
+const xpIntoLevel = (xp) => xp - xpForLevel(levelFromXp(xp));            // XP within the current level
+const xpForNextLevel = (xp) => { const L = levelFromXp(xp); return xpForLevel(L + 1) - xpForLevel(L); }; // span of current level
 // Rank titles by level (cosmetic motivator).
 const RANKS = [
-  { min: 1, name: 'Novice' }, { min: 3, name: 'Apprentice' }, { min: 5, name: 'Squire' },
-  { min: 8, name: 'Knight' }, { min: 12, name: 'Champion' }, { min: 18, name: 'Titan' },
+  { min: 1, name: 'Novice' }, { min: 2, name: 'Apprentice' }, { min: 3, name: 'Squire' },
+  { min: 4, name: 'Knight' }, { min: 6, name: 'Champion' }, { min: 8, name: 'Titan' },
 ];
 function rankTitle(level) { let t = RANKS[0].name; for (const r of RANKS) if (level >= r.min) t = r.name; return t; }
 
@@ -303,7 +307,7 @@ function xpToNextEvo() {
   const lvl = levelFromXp(store.stats.xp);
   const next = EVO_LEVELS.find(lv => lv > lvl);
   if (!next) return null;
-  return (next - 1) * 100 - store.stats.xp;
+  return xpForLevel(next) - store.stats.xp;
 }
 // Compare answers letters-only, so spacing / slashes / punctuation never matter.
 function lettersOnly(s) { return String(s).toLowerCase().replace(/[^a-z]+/g, ''); }
@@ -741,7 +745,7 @@ function checkAchievements() {
   if ((st.maxCombo || 0) >= 10) unlockAchievement('combo10');
   if ((st.speedBestClean || 0) >= 15) unlockAchievement('flawlessSpd');
   if (Object.keys(st.modesPlayed || {}).length >= 4) unlockAchievement('allModes');
-  if (levelFromXp(st.xp) >= 10) unlockAchievement('level10');
+  if (levelFromXp(st.xp) >= 7) unlockAchievement('level10');
   if (hour >= 22 || hour < 5) unlockAchievement('nightOwl');
   if (hour >= 5 && hour < 8) unlockAchievement('earlyBird');
   if (store.flags && store.flags.comebackPending) unlockAchievement('comeback');
@@ -920,9 +924,10 @@ function renderHome() {
   $('#home-streak').textContent = st.dayStreak;
   $('#home-level').textContent = levelFromXp(st.xp);
   $('#home-mastered').textContent = masteredCount();
-  $('#home-xpfill').style.width = xpIntoLevel(st.xp) + '%';
+  const into = xpIntoLevel(st.xp), span = xpForNextLevel(st.xp);
+  $('#home-xpfill').style.width = Math.min(100, into / span * 100) + '%';
   $('#home-xptext').textContent = st.xp + ' XP';
-  $('#home-xpnext').textContent = 'Lv ' + (levelFromXp(st.xp) + 1) + ' in ' + (100 - xpIntoLevel(st.xp)) + ' XP';
+  $('#home-xpnext').textContent = 'Lv ' + (levelFromXp(st.xp) + 1) + ' in ' + (span - into) + ' XP';
   $('#home-rank').textContent = rankTitle(levelFromXp(st.xp));
   const doneToday = st.history[todayKey()] || 0;
   const goal = s.dailyGoal || 10;
