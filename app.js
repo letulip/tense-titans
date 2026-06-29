@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.8.5';
+const APP_VERSION = '1.8.6';
 const SCHEMA_VERSION = 6;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -1005,7 +1005,6 @@ function renderHome() {
   const due = dueCount();
   const banner = $('#review-banner');
   banner.classList.toggle('hidden', due === 0);
-  $('#review-caughtup').classList.toggle('hidden', due > 0);
   if (due > 0) $('#review-count').textContent = due;
   // Trouble-spots banner at the bottom: the verbs being missed most
   const tc = troubleCount();
