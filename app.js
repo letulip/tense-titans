@@ -4,8 +4,8 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.3.2';
-const SCHEMA_VERSION = 3;        // bump + add a migration when store shape changes
+const APP_VERSION = '1.4.0';
+const SCHEMA_VERSION = 4;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
 
@@ -52,15 +52,33 @@ const VOICE_PRESETS = [
   { id: 'chipmunk', name: '🐿️ Chipmunk', rate: 1.4, pitch: 2.0 },
   { id: 'slowmo',   name: '🐢 Slow-mo', rate: 0.6, pitch: 1.0 },
 ];
+const SPEED_SECONDS = 60;        // Speed round length
+// hidden: true -> shown as "???" until earned
 const ACHIEVEMENTS = [
-  { id: 'first',      ico: '👣', name: 'First steps',  desc: 'Answer your first verb' },
-  { id: 'correct10',  ico: '✅', name: 'Getting it',   desc: '10 correct answers' },
-  { id: 'correct50',  ico: '💪', name: 'On a roll',    desc: '50 correct answers' },
-  { id: 'streak3',    ico: '🔥', name: '3-day streak', desc: 'Practice 3 days in a row' },
-  { id: 'streak7',    ico: '🌟', name: 'Week warrior', desc: 'Practice 7 days in a row' },
-  { id: 'mastered10', ico: '🌳', name: 'Green thumb',  desc: 'Master 10 verbs' },
-  { id: 'mastered25', ico: '🏆', name: 'Verb master',  desc: 'Master 25 verbs' },
-  { id: 'perfect',    ico: '💯', name: 'Flawless',     desc: 'A perfect session' },
+  { id: 'first',       ico: '👣', name: 'First steps',  desc: 'Answer your first verb' },
+  { id: 'correct10',   ico: '✅', name: 'Getting it',   desc: '10 correct answers' },
+  { id: 'correct50',   ico: '💪', name: 'On a roll',    desc: '50 correct answers' },
+  { id: 'correct100',  ico: '🎯', name: 'Centurion',    desc: '100 correct answers' },
+  { id: 'streak3',     ico: '🔥', name: '3-day streak', desc: 'Practice 3 days in a row' },
+  { id: 'streak7',     ico: '🌟', name: 'Week warrior', desc: 'Practice 7 days in a row' },
+  { id: 'streak14',    ico: '📅', name: 'Fortnight',    desc: 'Practice 14 days in a row' },
+  { id: 'mastered10',  ico: '🌳', name: 'Green thumb',  desc: 'Master 10 verbs' },
+  { id: 'mastered25',  ico: '🏆', name: 'Verb master',  desc: 'Master 25 verbs' },
+  { id: 'champion1',   ico: '👑', name: 'Legend',       desc: 'Get your first 🌟 Champion verb' },
+  { id: 'perfect',     ico: '💯', name: 'Flawless',     desc: 'A perfect session' },
+  { id: 'type50',      ico: '⌨️', name: 'Touch typist', desc: '50 correct in Type it' },
+  { id: 'match25',     ico: '🌍', name: 'Translator',   desc: '25 correct in Match' },
+  { id: 'speed15',     ico: '⚡', name: 'Speed demon',  desc: 'Score 15+ in a Speed round' },
+  { id: 'speed25',     ico: '🚀', name: 'Lightning',    desc: 'Score 25+ in a Speed round' },
+  { id: 'combo10',     ico: '🔗', name: 'Combo master', desc: '10-answer combo in Speed' },
+  { id: 'allModes',    ico: '🎮', name: 'Jack of all',  desc: 'Play all four game modes' },
+  { id: 'level10',     ico: '🎖️', name: 'Veteran',      desc: 'Reach level 10' },
+  // ---- hidden ----
+  { id: 'nightOwl',    ico: '🦉', name: 'Night Owl',    desc: 'Practice late at night', hidden: true },
+  { id: 'earlyBird',   ico: '🐤', name: 'Early Bird',   desc: 'Practice early in the morning', hidden: true },
+  { id: 'comeback',    ico: '💖', name: 'Comeback Kid', desc: 'Return after a week away', hidden: true },
+  { id: 'flawlessSpd', ico: '🛡️', name: 'Untouchable',  desc: 'Speed round 15+ with zero misses', hidden: true },
+  { id: 'polyglot',    ico: '🗺️', name: 'Polyglot',     desc: '50 correct in Match', hidden: true },
 ];
 
 /* ---------- State ---------- */
@@ -80,6 +98,8 @@ function defaultStore() {
     stats: {
       xp: 0, dayStreak: 0, bestStreak: 0, lastStudyDate: null,
       totalAnswers: 0, totalCorrect: 0, history: {},
+      typeCorrect: 0, matchCorrect: 0, speedBest: 0, speedBestClean: 0, maxCombo: 0,
+      modesPlayed: {},
     },
     achievements: {},      // id -> ISO date unlocked
     settings: {
@@ -317,69 +337,108 @@ function chooseForm(v) {
    ============================================================ */
 function startSession(mode) {
   const goal = store.settings.dailyGoal || 10;
-  session = { mode, total: goal, index: 0, correct: 0, lastId: null,
-              newBudget: { left: NEW_PER_SESSION }, q: null, answered: false };
+  store.stats.modesPlayed[mode] = true;
+  session = {
+    mode, total: goal, index: 0, correct: 0, answered: 0, gainedXp: 0,
+    lastId: null, newBudget: { left: NEW_PER_SESSION }, q: null,
+    // speed-round state
+    score: 0, combo: 0, bestCombo: 0, misses: 0,
+    endTime: mode === 'speed' ? Date.now() + SPEED_SECONDS * 1000 : 0,
+    timer: null, ended: false,
+  };
+  document.getElementById('screen-play').classList.toggle('mode-speed', mode === 'speed');
   show('play');
+  if (mode === 'speed') {
+    session.timer = setInterval(tickSpeed, 100);
+    tickSpeed();
+  }
   nextQuestion();
 }
 
+function tickSpeed() {
+  if (!session || session.mode !== 'speed' || session.ended) return;
+  const left = Math.max(0, session.endTime - Date.now());
+  $('#play-timer-fill').style.width = (left / (SPEED_SECONDS * 1000) * 100) + '%';
+  $('#play-count').textContent = '⏱ ' + Math.ceil(left / 1000) + 's';
+  $('#play-score').textContent = '🏆 ' + session.score;
+  if (left <= 0) endSpeed();
+}
+
 function nextQuestion() {
-  if (session.index >= session.total) return endSession();
+  if (session.mode === 'speed') {
+    if (session.ended || Date.now() >= session.endTime) return endSpeed();
+  } else if (session.index >= session.total) {
+    return endSession();
+  }
   session.answered = false;
   const v = pickVerb(session.lastId, session.newBudget);
   session.lastId = v.id;
-  const which = chooseForm(v);   // test the form that needs it most
-  session.q = { v, which, answer: v[which] };
+  if (session.mode === 'match') {
+    session.q = { kind: 'translate', v, answer: v.ru.join(', ') };
+  } else {
+    const which = chooseForm(v);   // test the form that needs it most
+    session.q = { kind: 'form', v, which, answer: v[which] };
+  }
   renderQuestion();
 }
 
 function renderQuestion() {
-  const { v, which } = session.q;
-  $('#play-count').textContent = (session.index + 1) + '/' + session.total;
-  $('#play-progress-fill').style.width = (session.index / session.total * 100) + '%';
+  const { v, kind } = session.q;
+  if (session.mode !== 'speed') {
+    $('#play-count').textContent = (session.index + 1) + '/' + session.total;
+    $('#play-progress-fill').style.width = (session.index / session.total * 100) + '%';
+  }
   $('#feedback').textContent = '';
   $('#feedback').className = 'feedback';
   $('#translation').classList.add('hidden');
   $('#translation').textContent = v.ru.join(', ');
+  $('#translate-btn').classList.toggle('hidden', kind === 'translate'); // no hint button when translation IS the question
 
-  // Build the triple with the tested form blanked
-  const pastCell = which === 'past'
-    ? `<span class="blank" id="blank">?</span>`
-    : `<span class="form muted">${v.past}</span>`;
-  const ppCell = which === 'pp'
-    ? `<span class="blank" id="blank">?</span>`
-    : `<span class="form muted">${v.pp}</span>`;
-  $('#triple').innerHTML = `
-    <div class="label">base · past · participle</div>
-    <div class="form-line">
-      <span class="form">${v.base}</span>
-      <span class="arrow">→</span>
-      ${pastCell}
-      <span class="arrow">→</span>
-      ${ppCell}
-    </div>`;
+  if (kind === 'translate') {
+    $('#triple').innerHTML = `
+      <div class="label">what does it mean?</div>
+      <div class="form-line"><span class="form">${v.base}</span></div>
+      <div class="sub-forms">${v.past} · ${v.pp}</div>`;
+  } else {
+    const which = session.q.which;
+    const pastCell = which === 'past' ? `<span class="blank" id="blank">?</span>` : `<span class="form muted">${v.past}</span>`;
+    const ppCell = which === 'pp' ? `<span class="blank" id="blank">?</span>` : `<span class="form muted">${v.pp}</span>`;
+    $('#triple').innerHTML = `
+      <div class="label">base · past · participle</div>
+      <div class="form-line">
+        <span class="form">${v.base}</span><span class="arrow">→</span>${pastCell}<span class="arrow">→</span>${ppCell}
+      </div>`;
+  }
 
   const area = $('#answer-area');
   area.innerHTML = '';
-  if (session.mode === 'pick') {
-    buildOptions(area);
-  } else {
-    buildTypeInput(area);
-  }
+  if (kind === 'translate') buildTranslateOptions(area);
+  else if (session.mode === 'type') buildTypeInput(area);
+  else buildOptions(area);              // pick & speed -> multiple choice
 }
 
 function buildOptions(area) {
   const { which, answer } = session.q;
-  // distractors: same form-type from other verbs
   const others = VERBS.filter(x => x.id !== session.q.v.id).map(x => x[which]);
   const opts = new Set([answer]);
-  while (opts.size < 4 && others.length) {
-    opts.add(others[Math.floor(Math.random() * others.length)]);
-  }
-  const list = shuffle(Array.from(opts));
-  for (const opt of list) {
+  while (opts.size < 4 && others.length) opts.add(others[Math.floor(Math.random() * others.length)]);
+  for (const opt of shuffle(Array.from(opts))) {
     const b = document.createElement('button');
     b.className = 'opt-btn';
+    b.textContent = opt;
+    b.onclick = () => handleAnswer(opt, b);
+    area.appendChild(b);
+  }
+}
+
+function buildTranslateOptions(area) {
+  const answer = session.q.answer;                 // correct ru joined
+  const others = VERBS.filter(x => x.id !== session.q.v.id).map(x => x.ru.join(', '));
+  const opts = new Set([answer]);
+  while (opts.size < 4 && others.length) opts.add(others[Math.floor(Math.random() * others.length)]);
+  for (const opt of shuffle(Array.from(opts))) {
+    const b = document.createElement('button');
+    b.className = 'opt-btn ru';
     b.textContent = opt;
     b.onclick = () => handleAnswer(opt, b);
     area.appendChild(b);
@@ -408,65 +467,87 @@ function buildTypeInput(area) {
   setTimeout(() => input.focus(), 50);
 }
 
+function addXp(n) { store.stats.xp += n; session.gainedXp += n; }
+
 function handleAnswer(given, el) {
   if (session.answered) return;
   session.answered = true;
-  const { v, which, answer } = session.q;
-  const ok = isCorrect(given, answer);
-  const p = prog(v.id);
-  const f = p[which];          // the form being tested (past or pp)
-  p.lastSeen = Date.now();
+  const q = session.q, answer = q.answer;
+  const ok = q.kind === 'translate' ? given === answer : isCorrect(given, answer);
   store.stats.totalAnswers++;
+  if (ok) { session.correct++; store.stats.totalCorrect++; }
 
-  if (ok) {
-    f.correct++;
-    session.correct++;
-    store.stats.totalCorrect++;
-    store.stats.xp += session.mode === 'type' ? 15 : 10;   // Type it = +50% XP
-    const modeCap = session.mode === 'type' ? FORM_MAX : PICK_FORM_CAP;
-    let hint = '';
-    if (f.lvl >= modeCap) {
-      hint = session.mode === 'pick' ? 'Switch to ⌨️ Type it to level up!' : '';
-    } else if (f.lvl >= SCHEDULE_GATE && Date.now() < (f.due || 0)) {
-      hint = 'Counts! Comes back for review later ⏳';   // scheduled — no level yet
+  let hint = '';
+  if (q.kind === 'form' && (session.mode === 'pick' || session.mode === 'type')) {
+    // --- spaced-repetition leveling (learning modes only) ---
+    const p = prog(q.v.id), f = p[q.which];
+    p.lastSeen = Date.now();
+    if (ok) {
+      f.correct++;
+      if (session.mode === 'type') store.stats.typeCorrect++;
+      addXp(session.mode === 'type' ? 15 : 10);
+      const modeCap = session.mode === 'type' ? FORM_MAX : PICK_FORM_CAP;
+      if (f.lvl >= modeCap) {
+        hint = session.mode === 'pick' ? 'Switch to ⌨️ Type it to level up!' : '';
+      } else if (f.lvl >= SCHEDULE_GATE && Date.now() < (f.due || 0)) {
+        hint = 'Counts! Comes back for review later ⏳';
+      } else {
+        f.lvl++;
+        f.peak = Math.max(f.peak, f.lvl);
+        let wait = INTERVAL_DAYS[f.lvl] || 0;
+        if (f.lvl < f.peak) wait = Math.ceil(wait / 2);
+        f.due = Date.now() + wait * DAY;
+        if (minLvl(p) === STAGE_MIN.mastered) hint = '🌳 Mastered!';
+        else if (minLvl(p) === STAGE_MIN.gold) hint = '🌟 Champion verb!';
+      }
     } else {
-      f.lvl++;
-      f.peak = Math.max(f.peak, f.lvl);
-      let wait = INTERVAL_DAYS[f.lvl] || 0;
-      if (f.lvl < f.peak) wait = Math.ceil(wait / 2);     // relearn 2x faster
-      f.due = Date.now() + wait * DAY;
-      if (minLvl(p) === STAGE_MIN.mastered) hint = '🌳 Mastered!';
-      else if (minLvl(p) === STAGE_MIN.gold) hint = '🌟 Champion verb!';
+      f.wrong++; f.lvl = Math.max(0, f.lvl - 2); f.due = Date.now();
     }
-    feedbackGood(el, answer, hint);
-    sfx(true);
-    speak(answer);
-  } else {
-    f.wrong++;
-    f.lvl = Math.max(0, f.lvl - 2);   // a miss costs two levels on that form...
-    f.due = Date.now();               // ...and it's due to relearn right away
-    feedbackBad(el, answer);
-    sfx(false);
+  } else if (q.kind === 'translate') {
+    if (ok) { store.stats.matchCorrect++; addXp(8); }
+  } else if (session.mode === 'speed') {
+    if (ok) {
+      session.score++; session.combo++;
+      session.bestCombo = Math.max(session.bestCombo, session.combo);
+      store.stats.maxCombo = Math.max(store.stats.maxCombo || 0, session.combo);
+      addXp(5 + Math.min(session.combo, 5));   // combo bonus
+    } else { session.misses++; session.combo = 0; }
   }
 
-  // reveal answer in the triple
+  // --- feedback / juice ---
+  if (ok) {
+    feedbackGood(el, answer, hint);
+    sfx(session.mode === 'speed' && session.combo >= 3 ? 'combo' : 'good');
+    confettiBurst(session.combo >= 5 ? 22 : 12);
+    if (session.mode === 'speed' && session.combo >= 3) showCombo(session.combo);
+    speak(q.kind === 'translate' ? q.v.base : answer);
+  } else {
+    feedbackBad(el, answer);
+    sfx('bad');
+  }
+
   const blank = $('#blank');
   if (blank) { blank.textContent = answer; blank.classList.add('filled'); if (!ok) blank.classList.add('wrong'); }
 
-  // disable options / lock input
-  if (session.mode === 'pick') {
+  if (q.kind === 'translate' || session.mode === 'pick' || session.mode === 'speed') {
     $$('.opt-btn').forEach(b => {
       b.disabled = true;
-      if (isCorrect(b.textContent, answer)) b.classList.add('correct');
+      const isAns = q.kind === 'translate' ? b.textContent === answer : isCorrect(b.textContent, answer);
+      if (isAns) b.classList.add('correct');
       else if (b === el && !ok) b.classList.add('wrong');
     });
   }
 
   checkAchievements();
   saveStore();
-  session.index++;
-  $('#play-progress-fill').style.width = (session.index / session.total * 100) + '%';
-  setTimeout(nextQuestion, ok ? 900 : 1700);
+
+  if (session.mode === 'speed') {
+    setTimeout(nextQuestion, ok ? 300 : 650);
+  } else {
+    session.index++;
+    $('#play-progress-fill').style.width = (session.index / session.total * 100) + '%';
+    setTimeout(nextQuestion, ok ? 900 : 1700);
+  }
 }
 
 function feedbackGood(el, answer, hint) {
@@ -483,78 +564,136 @@ function feedbackBad(el, answer) {
   if (el) { el.classList.add('shake', 'wrong'); setTimeout(() => el.classList.remove('shake'), 350); }
 }
 
-function endSession() {
-  // streak bookkeeping (only counts once per calendar day)
-  const today = todayKey();
-  const last = store.stats.lastStudyDate;
+// Streak + daily-goal history bookkeeping (any mode counts toward the streak).
+function recordSession(answered) {
+  const today = todayKey(), last = store.stats.lastStudyDate;
   if (last !== today) {
-    const y = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const y = new Date(Date.now() - DAY).toISOString().slice(0, 10);
     store.stats.dayStreak = (last === y) ? store.stats.dayStreak + 1 : 1;
     store.stats.lastStudyDate = today;
     store.stats.bestStreak = Math.max(store.stats.bestStreak, store.stats.dayStreak);
   }
-  store.stats.history[today] = (store.stats.history[today] || 0) + session.total;
+  store.stats.history[today] = (store.stats.history[today] || 0) + answered;
+}
 
-  const acc = session.total ? Math.round(session.correct / session.total * 100) : 0;
-  const gainedXp = session.correct * (session.mode === 'type' ? 15 : 10);
-  const perfect = session.correct === session.total && session.total > 0;
-  if (perfect) store.stats.xp += 20; // bonus
-
+function collectRewards() {
   const unlocks = checkUnlocks();
-  if (perfect) unlockAchievement('perfect');
   checkAchievements();
-
-  // Mascot evolution: did this session push us to a new evolution stage?
   const newEvo = currentEvoStage();
   let evolved = null;
-  if (newEvo > (store.flags.evoStage || 0)) {
-    evolved = newEvo;
-    store.flags.evoStage = newEvo;
+  if (newEvo > (store.flags.evoStage || 0)) { evolved = newEvo; store.flags.evoStage = newEvo; }
+  return { unlocks, evolved };
+}
+
+function renderResultUnlocks(evolved, unlocks) {
+  const ul = $('#results-unlocks'); ul.innerHTML = '';
+  if (evolved !== null) {
+    const d = document.createElement('div'); d.className = 'unlock-pill evo';
+    d.textContent = `${mascotFormEmoji(evolved)} Your ${mascotDef().name} evolved to ${EVO_NAMES[evolved]}!`;
+    ul.appendChild(d);
   }
+  unlocks.forEach(u => {
+    const d = document.createElement('div'); d.className = 'unlock-pill';
+    d.textContent = '🔓 Unlocked: ' + u; ul.appendChild(d);
+  });
+}
+function setResultLabels(a, b, c) {
+  $('#results-l1').textContent = a; $('#results-l2').textContent = b; $('#results-l3').textContent = c;
+}
+
+function endSession() {
+  recordSession(session.total);
+  const acc = session.total ? Math.round(session.correct / session.total * 100) : 0;
+  const perfect = session.correct === session.total && session.total > 0;
+  if (perfect) { addXp(20); unlockAchievement('perfect'); }
+  const { unlocks, evolved } = collectRewards();
   saveStore();
 
   $('#results-emoji').textContent = perfect ? '🏆' : (acc >= 60 ? '🎉' : '💡');
   $('#results-title').textContent = perfect ? 'Flawless quest!' : 'Quest complete!';
   $('#results-correct').textContent = session.correct + '/' + session.total;
   $('#results-accuracy').textContent = acc + '%';
-  $('#results-xp').textContent = '+' + (gainedXp + (perfect ? 20 : 0));
-  const ul = $('#results-unlocks');
-  ul.innerHTML = '';
-  if (evolved !== null) {
-    const d = document.createElement('div');
-    d.className = 'unlock-pill evo';
-    d.textContent = `${mascotFormEmoji(evolved)} Your ${mascotDef().name} evolved to ${EVO_NAMES[evolved]}!`;
-    ul.appendChild(d);
-  }
-  unlocks.forEach(u => {
-    const d = document.createElement('div');
-    d.className = 'unlock-pill';
-    d.textContent = '🔓 Unlocked: ' + u;
-    ul.appendChild(d);
-  });
+  $('#results-xp').textContent = '+' + session.gainedXp;
+  setResultLabels('correct', 'accuracy', 'XP');
+  renderResultUnlocks(evolved, unlocks);
+  if (perfect) confettiBurst(40);
+  show('results');
+}
+
+function endSpeed() {
+  if (session.ended) return;
+  session.ended = true;
+  clearInterval(session.timer);
+  recordSession(session.score);
+  store.stats.speedBest = Math.max(store.stats.speedBest || 0, session.score);
+  if (session.misses === 0 && session.score > 0) store.stats.speedBestClean = Math.max(store.stats.speedBestClean || 0, session.score);
+  const { unlocks, evolved } = collectRewards();
+  saveStore();
+
+  $('#results-emoji').textContent = session.score >= 20 ? '🚀' : session.score >= 10 ? '⚡' : '⏱️';
+  $('#results-title').textContent = 'Time! Speed round done';
+  $('#results-correct').textContent = session.score;
+  $('#results-accuracy').textContent = '🔗 ' + session.bestCombo;
+  $('#results-xp').textContent = '+' + session.gainedXp;
+  setResultLabels('score', 'best combo', 'XP');
+  renderResultUnlocks(evolved, unlocks);
+  if (session.score >= 15) confettiBurst(40);
   show('results');
 }
 
 /* ============================================================
    Achievements & unlocks
    ============================================================ */
+function championCount() {
+  return VERBS.filter(v => { const p = store.progress[v.id]; return p && minLvl(p) >= STAGE_MIN.gold; }).length;
+}
 function unlockAchievement(id) {
   if (store.achievements[id]) return false;
   store.achievements[id] = new Date().toISOString();
   const a = ACHIEVEMENTS.find(x => x.id === id);
-  if (a) toast('🏆 ' + a.name + ' unlocked!');
+  if (a) showAchievementPop(a);
   return true;
 }
 function checkAchievements() {
-  const st = store.stats;
+  const st = store.stats, hour = new Date().getHours();
   if (st.totalAnswers >= 1) unlockAchievement('first');
   if (st.totalCorrect >= 10) unlockAchievement('correct10');
   if (st.totalCorrect >= 50) unlockAchievement('correct50');
+  if (st.totalCorrect >= 100) unlockAchievement('correct100');
   if (st.dayStreak >= 3) unlockAchievement('streak3');
   if (st.dayStreak >= 7) unlockAchievement('streak7');
+  if (st.dayStreak >= 14) unlockAchievement('streak14');
   const mc = masteredCount();
   if (mc >= 10) unlockAchievement('mastered10');
   if (mc >= 25) unlockAchievement('mastered25');
+  if (championCount() >= 1) unlockAchievement('champion1');
+  if ((st.typeCorrect || 0) >= 50) unlockAchievement('type50');
+  if ((st.matchCorrect || 0) >= 25) unlockAchievement('match25');
+  if ((st.matchCorrect || 0) >= 50) unlockAchievement('polyglot');
+  if ((st.speedBest || 0) >= 15) unlockAchievement('speed15');
+  if ((st.speedBest || 0) >= 25) unlockAchievement('speed25');
+  if ((st.maxCombo || 0) >= 10) unlockAchievement('combo10');
+  if ((st.speedBestClean || 0) >= 15) unlockAchievement('flawlessSpd');
+  if (Object.keys(st.modesPlayed || {}).length >= 4) unlockAchievement('allModes');
+  if (levelFromXp(st.xp) >= 10) unlockAchievement('level10');
+  if (hour >= 22 || hour < 5) unlockAchievement('nightOwl');
+  if (hour >= 5 && hour < 8) unlockAchievement('earlyBird');
+  if (store.flags && store.flags.comebackPending) unlockAchievement('comeback');
+}
+
+// Animated unlock banner (queued so multiple unlocks don't overlap).
+let achQueue = [];
+function showAchievementPop(a) { achQueue.push(a); if (achQueue.length === 1) drainAchQueue(); }
+function drainAchQueue() {
+  const a = achQueue[0]; if (!a) return;
+  const el = $('#ach-pop');
+  el.innerHTML = `<div class="ap-ico">${a.ico}</div><div class="ap-txt"><div class="ap-title">Achievement unlocked!</div><div class="ap-name">${a.name}</div></div>`;
+  el.classList.remove('hidden', 'show'); void el.offsetWidth; el.classList.add('show');
+  sfx('achievement'); confettiBurst(26);
+  setTimeout(() => {
+    el.classList.add('hidden'); el.classList.remove('show');
+    achQueue.shift(); if (achQueue.length) drainAchQueue();
+  }, 2700);
 }
 // Returns names of cosmetics newly crossed the XP threshold (for the results screen).
 function checkUnlocks() {
@@ -593,24 +732,56 @@ function speak(text) {
     speechSynthesis.speak(u);
   } catch (e) { /* ignore */ }
 }
-// tiny WebAudio blip so we don't ship sound files
+// tiny WebAudio note sequences so we don't ship sound files
 let audioCtx = null;
-function sfx(good) {
+const SFX = {
+  good:        [[660, 0], [880, 0.09]],
+  bad:         [[300, 0], [200, 0.12]],
+  combo:       [[660, 0], [880, 0.06], [1175, 0.12]],
+  achievement: [[523, 0], [659, 0.1], [784, 0.2], [1047, 0.32]],
+};
+function sfx(type) {
   if (!store.settings.sound) return;
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    o.connect(g); g.connect(audioCtx.destination);
-    o.type = 'sine';
-    const t = audioCtx.currentTime;
-    if (good) { o.frequency.setValueAtTime(660, t); o.frequency.setValueAtTime(880, t + 0.09); }
-    else { o.frequency.setValueAtTime(300, t); o.frequency.setValueAtTime(200, t + 0.12); }
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.18, t + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
-    o.start(t); o.stop(t + 0.26);
+    const notes = SFX[type] || SFX.good;
+    const t0 = audioCtx.currentTime;
+    notes.forEach(([f, dt]) => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.connect(g); g.connect(audioCtx.destination);
+      o.type = 'sine'; o.frequency.value = f;
+      const t = t0 + dt;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.16, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.19);
+      o.start(t); o.stop(t + 0.2);
+    });
   } catch (e) { /* ignore */ }
+}
+
+// Lightweight confetti (DOM particles, auto-removed). Visual only.
+function confettiBurst(n = 14) {
+  const root = $('#confetti'); if (!root) return;
+  const colors = ['#ffd166', '#6c5ce7', '#2ecc71', '#ff6b6b', '#a29bfe', '#00b3c4'];
+  for (let i = 0; i < n; i++) {
+    const p = document.createElement('div');
+    p.className = 'confetti-piece';
+    p.style.left = (50 + (Math.random() * 46 - 23)) + '%';
+    p.style.background = colors[i % colors.length];
+    p.style.setProperty('--dx', (Math.random() * 220 - 110) + 'px');
+    p.style.setProperty('--dy', (160 + Math.random() * 260) + 'px');
+    p.style.setProperty('--rot', (Math.random() * 720 - 360) + 'deg');
+    p.style.animationDelay = (Math.random() * 0.08) + 's';
+    root.appendChild(p);
+    setTimeout(() => p.remove(), 1300);
+  }
+}
+function showCombo(n) {
+  const el = $('#combo-badge'); if (!el) return;
+  el.textContent = '🔥 ' + n + ' combo!';
+  el.classList.remove('hidden', 'show'); void el.offsetWidth; el.classList.add('show');
+  clearTimeout(showCombo._t);
+  showCombo._t = setTimeout(() => el.classList.add('hidden'), 800);
 }
 
 /* ============================================================
@@ -706,12 +877,17 @@ function renderStats() {
 function renderAchievements() {
   const grid = $('#ach-grid');
   grid.innerHTML = '';
+  const got = ACHIEVEMENTS.filter(a => store.achievements[a.id]).length;
+  $('#ach-progress-text').textContent = got + ' / ' + ACHIEVEMENTS.length + ' unlocked';
+  $('#ach-progress-fill').style.width = (got / ACHIEVEMENTS.length * 100) + '%';
   for (const a of ACHIEVEMENTS) {
     const on = !!store.achievements[a.id];
+    const secret = a.hidden && !on;
     const d = document.createElement('div');
-    d.className = 'ach' + (on ? ' unlocked' : '');
-    d.innerHTML = `<div class="ico">${on ? a.ico : '🔒'}</div>
-      <div class="name">${a.name}</div><div class="desc">${a.desc}</div>`;
+    d.className = 'ach' + (on ? ' unlocked' : '') + (a.hidden ? ' secret' : '');
+    d.innerHTML = `<div class="ico">${on ? a.ico : (secret ? '❓' : '🔒')}</div>
+      <div class="name">${secret ? '???' : a.name}</div>
+      <div class="desc">${secret ? 'Hidden — keep playing!' : a.desc}</div>`;
     grid.appendChild(d);
   }
 }
@@ -792,6 +968,10 @@ function howToPlayHTML() {
       <div class="how-row"><div class="how-ico">⌨️</div><div>
         <b>Type it</b> <span class="xp-badge">+50% XP</span><br>
         <small>Spell the form yourself. <b>Only Type it can grow a verb past level 3</b> — needed for 🌳 — and it pays more XP!</small></div></div>
+      <div class="how-row"><div class="how-ico">🌍</div><div>
+        <b>Match meaning</b><br><small>Pick the Russian translation. A fun warm-up — earns XP &amp; achievements.</small></div></div>
+      <div class="how-row"><div class="how-ico">⚡</div><div>
+        <b>Speed round</b><br><small>60 seconds, as many as you can. Build a 🔥 combo for bonus XP!</small></div></div>
       <hr>
       <div class="how-stages">
         ${STAGES.map(s => `<div class="how-stage"><span>${s.emoji}</span> <b>${s.name}</b><small>${s.hint}</small></div>`).join('')}
@@ -928,7 +1108,12 @@ function pickFrom(a) { return a[Math.floor(Math.random() * a.length)]; }
 function wire() {
   $$('[data-go]').forEach(b => b.onclick = () => show(b.dataset.go));
   $$('[data-mode]').forEach(b => b.onclick = () => startSession(b.dataset.mode));
-  $('#play-quit').onclick = () => { if (confirm('Quit this quest? Progress so far is saved.')) show('home'); };
+  $('#play-quit').onclick = () => {
+    if (confirm('Quit this round? Progress so far is saved.')) {
+      if (session) { session.ended = true; clearInterval(session.timer); }
+      show('home');
+    }
+  };
   $('#translate-btn').onclick = () => $('#translation').classList.toggle('hidden');
   $('#speak-btn').onclick = () => { if (session && session.q) speak(session.q.v.base + '. ' + session.q.v.past + '. ' + session.q.v.pp); };
   $('#results-again').onclick = () => startSession(session ? session.mode : 'pick');
@@ -1006,6 +1191,9 @@ async function boot() {
   }
   VERBS.forEach(v => verbById[v.id] = v);
   decayAll();           // apply the forgetting curve for any time away
+  // "Comeback Kid": flag a long absence so the next answer unlocks it
+  const last = store.stats.lastStudyDate;
+  if (last && (Date.now() - new Date(last).getTime()) / DAY >= 7) store.flags.comebackPending = true;
   saveStore();
   applyCosmetics();
   wire();

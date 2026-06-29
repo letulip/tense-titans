@@ -64,6 +64,19 @@
         </button>
       </div>
 
+      <div class="mode-head"><span>Fun modes</span></div>
+      <div class="mode-grid">
+        <button class="mode-card fun" data-mode="match">
+          <div class="mode-ico">🌍</div><div class="mode-name">Match meaning</div>
+          <div class="mode-desc">Pick the translation</div>
+        </button>
+        <button class="mode-card fun" data-mode="speed">
+          <span class="mode-badge speed">⏱ 60s</span>
+          <div class="mode-ico">⚡</div><div class="mode-name">Speed round</div>
+          <div class="mode-desc">Race the clock!</div>
+        </button>
+      </div>
+
       <div class="home-foot">
         <button class="ghost-btn" data-go="stats">📊 Stats</button>
         <button class="ghost-btn" data-go="achievements">🏆 Achievements</button>
@@ -74,11 +87,16 @@
     <section class="screen hidden" id="screen-play">
       <header class="topbar">
         <button class="icon-btn" id="play-quit" title="Quit">✕</button>
-        <div class="play-progress"><div class="play-progress-fill" id="play-progress-fill"></div></div>
+        <div class="play-progress">
+          <div class="play-progress-fill" id="play-progress-fill"></div>
+          <div class="play-timer-fill" id="play-timer-fill"></div>
+        </div>
+        <div class="play-score" id="play-score"></div>
         <div class="play-count" id="play-count">1/10</div>
       </header>
 
       <div class="card-area">
+        <div class="combo-badge hidden" id="combo-badge"></div>
         <div class="verb-card" id="verb-card">
           <button class="translate-btn" id="translate-btn" title="Show translation">🇷🇺</button>
           <div class="triple" id="triple"></div>
@@ -98,9 +116,9 @@
         <div class="results-emoji" id="results-emoji">🎉</div>
         <h2 id="results-title">Quest complete!</h2>
         <div class="results-stats">
-          <div><b id="results-correct">0</b><small>correct</small></div>
-          <div><b id="results-accuracy">0%</b><small>accuracy</small></div>
-          <div><b id="results-xp">+0</b><small>XP</small></div>
+          <div><b id="results-correct">0</b><small id="results-l1">correct</small></div>
+          <div><b id="results-accuracy">0%</b><small id="results-l2">accuracy</small></div>
+          <div><b id="results-xp">+0</b><small id="results-l3">XP</small></div>
         </div>
         <div class="results-unlocks" id="results-unlocks"></div>
         <button class="big-btn" data-go="home">Back home</button>
@@ -129,6 +147,10 @@
         <div class="brand"><span>🏆 Achievements</span></div>
         <span style="width:40px"></span>
       </header>
+      <div class="ach-progress">
+        <div class="ach-progress-text" id="ach-progress-text">0 / 0 unlocked</div>
+        <div class="ach-progress-bar"><div class="ach-progress-fill" id="ach-progress-fill"></div></div>
+      </div>
       <div class="ach-grid" id="ach-grid"></div>
     </section>
 
@@ -234,6 +256,8 @@
   </div>
 
   <div class="toast hidden" id="toast"></div>
+  <div class="ach-pop hidden" id="ach-pop"></div>
+  <div class="confetti" id="confetti"></div>
   <input type="file" id="import-file" accept="application/json" hidden />
 
   <script src="app.js"></script>
