@@ -3,6 +3,7 @@
 
 export const DAY = 86400000;
 export const FORM_MAX = 10;       // top per-form level
+export const PICK_FORM_CAP = 3;   // recognition ("Pick") can raise a form only this high
 export const SCHEDULE_GATE = 3;   // at lvl >= this, a form advances only when it's "due"
 // Days to wait after REACHING a level before the form is due again (index = level).
 // Fibonacci-flavoured, tuned so: Growing(5) ≈ 3–5d, Mastered(7) ≈ 7–10d, Champion(10) ≈ 3 weeks.
@@ -33,4 +34,43 @@ export function decayForm(f, now = Date.now()) {
     f.due += graceDays(f.lvl) * DAY;   // consume one grace window
     f.lvl -= 1;                        // ...and slip a level (peak is kept → fast relearn)
   }
+}
+
+// Apply one answer to a single form. Pure: returns a NEW form state (input untouched) plus the
+// XP to award, a UI hint, and whether this was a recall mode. The caller applies the side effects
+// (XP, per-mode counters, lastSeen). `otherLvl` is the partner form's level (for stage hints).
+export function applyAnswer(form, { ok, mode, otherLvl = 0, now = Date.now() }) {
+  const recall = mode === 'type' || mode === 'review';   // typed = recall
+  const f = { ...form };
+  let hint = '', xp = 0;
+  if (ok) {
+    f.correct++;
+    xp = (recall || mode === 'trouble') ? 15 : 10;   // recall / fixing mistakes pays a bonus
+    if (mode === 'trouble') {
+      // Focused drill: a correct recall lifts the weak form back to the stable gate,
+      // so a fixed verb actually drops off the trouble list.
+      if (f.lvl < SCHEDULE_GATE) { f.lvl = SCHEDULE_GATE; f.peak = Math.max(f.peak, f.lvl); }
+      f.due = now + (INTERVAL_DAYS[f.lvl] || 0) * DAY;
+      hint = Math.min(f.lvl, otherLvl) >= SCHEDULE_GATE ? '✅ Fixed!' : 'Good — its other form still needs a fix';
+    } else {
+      const modeCap = recall ? FORM_MAX : PICK_FORM_CAP;
+      if (f.lvl >= modeCap) {
+        hint = !recall ? 'Switch to ⌨️ Type it to level up!' : '';
+      } else if (f.lvl >= SCHEDULE_GATE && now < (f.due || 0)) {
+        hint = 'Counts! Comes back for review later ⏳';
+      } else {
+        f.lvl++;
+        f.peak = Math.max(f.peak, f.lvl);
+        let wait = INTERVAL_DAYS[f.lvl] || 0;
+        if (f.lvl < f.peak) wait = Math.ceil(wait / 2);   // relearn faster below your peak
+        f.due = now + wait * DAY;
+        const m = Math.min(f.lvl, otherLvl);
+        if (m === STAGE_MIN.mastered) hint = '🌳 Mastered!';
+        else if (m === STAGE_MIN.gold) hint = '🌟 Champion verb!';
+      }
+    }
+  } else {
+    f.wrong++; f.lvl = Math.max(0, f.lvl - 2); f.due = now;   // a miss drops two levels, back to review now
+  }
+  return { form: f, hint, xp, recall };
 }

@@ -12,8 +12,8 @@ import {
 } from './src/core/leveling.js';
 import { ED_ALSO_VALID, lettersOnly, isCorrect, regularize, trapFor } from './src/core/matching.js';
 import {
-  DAY, FORM_MAX, SCHEDULE_GATE, INTERVAL_DAYS, STAGE_MIN,
-  newForm, minLvl, formDue, isReviewDue, graceDays, decayForm,
+  DAY, FORM_MAX, SCHEDULE_GATE, STAGE_MIN,
+  newForm, minLvl, decayForm, applyAnswer,
 } from './src/core/srs.js';
 import { SCHEMA_VERSION, defaultStore, migrate, looksLikeStore } from './src/core/store-migrate.js';
 import {
@@ -22,14 +22,13 @@ import {
 import { earnedAchievements } from './src/core/achievements.js';
 import { reqMet, reqText } from './src/core/cosmetics.js';
 
-const APP_VERSION = '1.8.16';
+const APP_VERSION = '1.8.17';
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
 
 /* ---- Spaced-repetition progression (per form: past & participle) ---- */
-// DAY / FORM_MAX / SCHEDULE_GATE / INTERVAL_DAYS / STAGE_MIN and the scheduling/selection
-// helpers now live in src/core/srs.js and src/core/selection.js (imported above).
-const PICK_FORM_CAP = 3;         // "Pick" (recognition) can raise a form only to level 3
+// All SRS tunables/helpers (DAY, FORM_MAX, PICK_FORM_CAP, SCHEDULE_GATE, INTERVAL_DAYS, STAGE_MIN,
+// scheduling, applyAnswer) and selection live in src/core/srs.js + src/core/selection.js.
 const STAGES = [
   { key: 'new',      emoji: '⚪', name: 'New',      hint: 'Not started yet' },
   { key: 'seedling', emoji: '🌱', name: 'Seedling', hint: 'Just started — keep answering' },
@@ -416,38 +415,16 @@ function handleAnswer(given, el) {
 
   let hint = '';
   if (q.kind === 'form' && ['pick', 'type', 'review', 'trouble'].includes(session.mode)) {
-    // --- spaced-repetition leveling (learning + review + trouble modes) ---
-    const recall = session.mode === 'type' || session.mode === 'review';   // typed = recall
-    const p = prog(q.v.id), f = p[q.which];
+    // Spaced-repetition leveling — the pure transition lives in src/core/srs.js (applyAnswer).
+    const p = prog(q.v.id);
     p.lastSeen = Date.now();
+    const otherLvl = (q.which === 'past' ? p.pp : p.past).lvl;
+    const res = applyAnswer(p[q.which], { ok, mode: session.mode, otherLvl });
+    p[q.which] = res.form;
+    hint = res.hint;
     if (ok) {
-      f.correct++;
-      if (recall) store.stats.typeCorrect++;
-      addXp(recall || session.mode === 'trouble' ? 15 : 10);   // fixing mistakes pays a bonus
-      if (session.mode === 'trouble') {
-        // Focused drill: a correct recall lifts the weak form back to the stable gate,
-        // so a fixed verb actually drops off the trouble list.
-        if (f.lvl < SCHEDULE_GATE) { f.lvl = SCHEDULE_GATE; f.peak = Math.max(f.peak, f.lvl); }
-        f.due = Date.now() + (INTERVAL_DAYS[f.lvl] || 0) * DAY;
-        hint = minLvl(p) >= SCHEDULE_GATE ? '✅ Fixed!' : 'Good — its other form still needs a fix';
-      } else {
-        const modeCap = recall ? FORM_MAX : PICK_FORM_CAP;
-        if (f.lvl >= modeCap) {
-          hint = !recall ? 'Switch to ⌨️ Type it to level up!' : '';
-        } else if (f.lvl >= SCHEDULE_GATE && Date.now() < (f.due || 0)) {
-          hint = 'Counts! Comes back for review later ⏳';
-        } else {
-          f.lvl++;
-          f.peak = Math.max(f.peak, f.lvl);
-          let wait = INTERVAL_DAYS[f.lvl] || 0;
-          if (f.lvl < f.peak) wait = Math.ceil(wait / 2);
-          f.due = Date.now() + wait * DAY;
-          if (minLvl(p) === STAGE_MIN.mastered) hint = '🌳 Mastered!';
-          else if (minLvl(p) === STAGE_MIN.gold) hint = '🌟 Champion verb!';
-        }
-      }
-    } else {
-      f.wrong++; f.lvl = Math.max(0, f.lvl - 2); f.due = Date.now();
+      if (res.recall) store.stats.typeCorrect++;
+      addXp(res.xp);
     }
   } else if (q.kind === 'translate') {
     if (ok) { store.stats.matchCorrect++; addXp(8); }
