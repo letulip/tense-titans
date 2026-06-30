@@ -17,7 +17,7 @@ export function defaultStore() {
     },
     achievements: {},      // id -> ISO date unlocked
     settings: {
-      name: '', mascot: 'dragon', theme: 'default', dark: false,
+      name: '', mascot: 'dragon', theme: 'default', dark: false, lang: 'ru',
       sound: true, haptics: true, voiceURI: '', rate: 1, pitch: 1, dailyGoal: 10, reduceEffects: false,
     },
     flags: { onboarded: false, evoStage: 0, unlocked: {} },
