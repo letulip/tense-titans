@@ -4,26 +4,27 @@
    ============================================================ */
 'use strict';
 
-// Pure leveling / rank / evolution math — extracted to a DOM-free, unit-tested module.
+// Pure, DOM-free, unit-tested cores (see src/core/* and test/*).
 import {
   EVO_LEVELS, RANKS,
   xpForLevel, levelFromXp, xpIntoLevel, xpForNextLevel,
   evoStageForLevel, rankTitle,
 } from './src/core/leveling.js';
+import { ED_ALSO_VALID, lettersOnly, isCorrect, regularize, trapFor } from './src/core/matching.js';
+import {
+  DAY, SCHEDULE_GATE, INTERVAL_DAYS,
+  newForm, minLvl, formDue, isReviewDue, graceDays, decayForm,
+} from './src/core/srs.js';
 
-const APP_VERSION = '1.8.11';
+const APP_VERSION = '1.8.12';
 const SCHEMA_VERSION = 6;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
 
 /* ---- Spaced-repetition progression (per form: past & participle) ---- */
-const DAY = 86400000;
+// DAY / SCHEDULE_GATE / INTERVAL_DAYS and the scheduling helpers now live in src/core/srs.js.
 const FORM_MAX = 10;             // top per-form level
 const PICK_FORM_CAP = 3;         // "Pick" (recognition) can raise a form only to level 3
-const SCHEDULE_GATE = 3;         // at level >= this, a form advances only when it's "due"
-// Days to wait after REACHING a level before the form is due to advance again (index = level).
-// Fibonacci-flavoured, tuned so: Growing(5)≈3–5d, Mastered(7)≈7–10d, Champion(10)≈3 weeks.
-const INTERVAL_DAYS = [0, 0, 0, 1, 2, 3, 3, 4, 5, 6, 0];
 // Stage thresholds by the WEAKER of the two forms (min level) — you must know BOTH.
 const STAGE_MIN = { sprout: 3, growing: 5, mastered: 7, gold: 10 };
 const STAGES = [
@@ -245,13 +246,11 @@ const todayKey = () => new Date().toISOString().slice(0, 10);
 // Leveling math (xpForLevel / levelFromXp / xpIntoLevel / xpForNextLevel) and
 // rank titles (RANKS / rankTitle) now live in src/core/leveling.js (imported above).
 
-function newForm() { return { lvl: 0, due: 0, peak: 0, correct: 0, wrong: 0 }; }
 function prog(id) {
   if (!store.progress[id]) store.progress[id] = { past: newForm(), pp: newForm(), lastSeen: 0 };
   return store.progress[id];
 }
 function isSeen(id) { return !!store.progress[id]; }
-function minLvl(p) { return Math.min(p.past.lvl, p.pp.lvl); }
 function masteredCount() {
   return VERBS.filter(v => { const p = store.progress[v.id]; return p && minLvl(p) >= STAGE_MIN.mastered; }).length;
 }
@@ -269,25 +268,13 @@ function stageOf(id) {
   return { idx, m, ...STAGES[idx] };
 }
 
-// ---- Forgetting curve: overdue forms slip levels (recover 2x faster via peak) ----
-function graceDays(lvl) { return Math.max(2, 2 * (INTERVAL_DAYS[lvl] || 0)); }
-function decayForm(f) {
-  let guard = 0;
-  while (f.lvl > 0 && f.due && Date.now() > f.due + graceDays(f.lvl) * DAY && guard++ < 30) {
-    f.due += graceDays(f.lvl) * DAY;   // consume one grace window
-    f.lvl -= 1;                        // ...and slip a level (peak is kept → fast relearn)
-  }
-}
+// Forgetting curve, scheduling gates, and graceDays now live in src/core/srs.js (imported above).
 function decayAll() {
   for (const id in store.progress) {
     const p = store.progress[id];
     if (p && p.past) { decayForm(p.past); decayForm(p.pp); }
   }
 }
-// Is a form ready to advance right now? (low levels are instant; high levels are scheduled)
-function formDue(f) { return f.lvl < SCHEDULE_GATE || Date.now() >= (f.due || 0); }
-// A scheduled form that is past its review date (the "do your reviews" queue).
-function isReviewDue(f) { return f.lvl > 0 && f.lvl >= SCHEDULE_GATE && Date.now() >= (f.due || 0); }
 function dueForms(p) {
   const out = [];
   if (isReviewDue(p.past)) out.push('past');
@@ -345,20 +332,7 @@ function xpToNextEvo() {
   if (!next) return null;
   return xpForLevel(next) - store.stats.xp;
 }
-// Compare answers letters-only, so spacing / slashes / punctuation never matter.
-function lettersOnly(s) { return String(s).toLowerCase().replace(/[^a-z]+/g, ''); }
-// Robust check for answers that may have two valid forms ("was/were", "got/gotten").
-// Accepts: either single form, the whole "was/were" token (Pick option), or both
-// forms typed together in any order / separator ("was were", "were, was", ...).
-function isCorrect(given, answer) {
-  const g = lettersOnly(given);
-  if (!g) return false;
-  const variants = answer.split('/').map(lettersOnly).filter(Boolean);
-  if (variants.includes(g)) return true;
-  const joined = variants.join('');
-  const joinedRev = [...variants].reverse().join('');
-  return g === joined || g === joinedRev;
-}
+// lettersOnly / isCorrect now live in src/core/matching.js (imported above).
 
 function toast(msg) {
   const t = $('#toast');
@@ -520,30 +494,14 @@ function renderQuestion() {
   else buildOptions(area);              // pick, speed, trouble -> multiple choice
 }
 
-// A naive over-regularized form (cut -> cuted) — a realistic learner mistake. Kept naive (no
-// consonant doubling) on purpose, so it can't accidentally match a real form like "quitted"/"wedded".
-function regularize(base) {
-  if (/[^aeiou]y$/i.test(base)) return base.slice(0, -1) + 'ied';
-  if (/e$/i.test(base)) return base + 'd';
-  return base + 'ed';
-}
-// The clean -t/-ed pairs (burn, learn, spell…) now carry BOTH forms in verbs.json ("burnt/burned"),
-// so isCorrect accepts either and the -ed distractor is auto-rejected. This set is only the verbs
-// whose -ed form is valid but rarer/sense-specific (kept single-form), so we skip the -ed trap there.
-const ED_ALSO_VALID = new Set(['kneel', 'light', 'speed', 'shine', 'broadcast']);
+// regularize / ED_ALSO_VALID and the confusable trap (trapFor) now live in src/core/matching.js.
 
 function buildOptions(area) {
   const { v, which, answer } = session.q;
   const opts = new Set([answer]);
-  // Sneaky trap: the verb's OTHER form (past<->participle), e.g. "gone" when asked for "went".
-  const otherForm = which === 'past' ? v.pp : v.past;
-  if (otherForm && !isCorrect(otherForm, answer)) {
-    opts.add(otherForm);
-  } else if (!ED_ALSO_VALID.has(v.id)) {
-    // past == participle (or never-changing): trap with the wrong "-ed" form (bringed, cuted...)
-    const reg = regularize(v.base);
-    if (reg && !isCorrect(reg, answer)) opts.add(reg);
-  }
+  // Sneaky trap: the verb's OTHER form (past<->participle), or a wrong "-ed" form. See trapFor.
+  const trap = trapFor(v, which, ED_ALSO_VALID);
+  if (trap) opts.add(trap);
   // Fill the rest with same-type forms from other verbs.
   const others = VERBS.filter(x => x.id !== v.id).map(x => x[which]);
   while (opts.size < 4 && others.length) opts.add(others[Math.floor(Math.random() * others.length)]);

@@ -148,3 +148,26 @@ Roll back any phase by reverting its single PR.
 Phase 1 + the `leveling` half of Phase 2: scaffold `package.json` + `test/`, extract
 `src/core/leveling.js`, add `test/leveling.test.js`, and have `app.js` import it. Small, reversible,
 and it establishes the test harness everything else builds on.
+
+## 10. Release-time minification (optional, do this LAST)
+
+Minifying JS/CSS shrinks the payload and speeds first load — but minification **is** a build step,
+which the project deliberately avoids. So treat it as an **opt-in release step**, added *after* the
+module split is done, that never blocks local development:
+
+- **Source of truth stays the readable `src/**` modules + `style.css`.** Local dev keeps running them
+  directly (`python3 -m http.server`) — no build needed to hack on the app, tests, or preview.
+- A single dev tool — **esbuild** (one dependency) — does both jobs in one `npm run build`:
+  - **JS:** bundle the ESM graph (`src/main.js` → one file) and minify → `dist/app.min.js`.
+    Bundling also collapses the many module HTTP requests back into one for production.
+  - **CSS:** `esbuild style.css --minify` → `dist/style.min.css` (or `lightningcss`).
+- Production `index.html` references the `dist/` files; `sw.js` precaches `dist/**` instead of `src/**`.
+- Release checklist gains: `npm run build` → bump `CACHE`/`APP_VERSION` → ship. Either commit `dist/`
+  or build it in a GitHub Actions step on push so the repo stays source-only.
+- **Why last:** bundling a half-migrated app is pointless, and keeping unminified source the default
+  means the test suite and the preview workflow are unaffected.
+
+Trade-off to accept consciously: this adds `node_modules` + a build command **for releases only**.
+The "no build step" promise still holds for *development* (raw files run as-is); *releases* gain an
+optional optimization pass. If even one dependency feels like too much, a zero-dep fallback is to
+minify CSS with a tiny regex pass and ship JS unminified — but esbuild is the pragmatic choice.
