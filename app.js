@@ -12,21 +12,22 @@ import {
 } from './src/core/leveling.js';
 import { ED_ALSO_VALID, lettersOnly, isCorrect, regularize, trapFor } from './src/core/matching.js';
 import {
-  DAY, SCHEDULE_GATE, INTERVAL_DAYS,
+  DAY, FORM_MAX, SCHEDULE_GATE, INTERVAL_DAYS, STAGE_MIN,
   newForm, minLvl, formDue, isReviewDue, graceDays, decayForm,
 } from './src/core/srs.js';
 import { defaultStore, migrate } from './src/core/store-migrate.js';
+import {
+  troubleList, troubleCount, dueForms, buildReviewQueue, pickVerb, chooseForm,
+} from './src/core/selection.js';
 
-const APP_VERSION = '1.8.13';
+const APP_VERSION = '1.8.14';
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
 
 /* ---- Spaced-repetition progression (per form: past & participle) ---- */
-// DAY / SCHEDULE_GATE / INTERVAL_DAYS and the scheduling helpers now live in src/core/srs.js.
-const FORM_MAX = 10;             // top per-form level
+// DAY / FORM_MAX / SCHEDULE_GATE / INTERVAL_DAYS / STAGE_MIN and the scheduling/selection
+// helpers now live in src/core/srs.js and src/core/selection.js (imported above).
 const PICK_FORM_CAP = 3;         // "Pick" (recognition) can raise a form only to level 3
-// Stage thresholds by the WEAKER of the two forms (min level) — you must know BOTH.
-const STAGE_MIN = { sprout: 3, growing: 5, mastered: 7, gold: 10 };
 const STAGES = [
   { key: 'new',      emoji: '⚪', name: 'New',      hint: 'Not started yet' },
   { key: 'seedling', emoji: '🌱', name: 'Seedling', hint: 'Just started — keep answering' },
@@ -195,48 +196,13 @@ function decayAll() {
     if (p && p.past) { decayForm(p.past); decayForm(p.pp); }
   }
 }
-function dueForms(p) {
-  const out = [];
-  if (isReviewDue(p.past)) out.push('past');
-  if (isReviewDue(p.pp)) out.push('pp');
-  return out;
-}
-// How many seen verbs have at least one form due for review right now.
+// dueForms / buildReviewQueue / troubleScore / troubleList / troubleCount / pickVerb / chooseForm
+// now live in src/core/selection.js (imported above). dueCount stays — it walks the global VERBS/store.
 function dueCount() {
   let n = 0;
   for (const v of VERBS) { const p = store.progress[v.id]; if (p && dueForms(p).length) n++; }
   return n;
 }
-// Flat, shuffled queue of every due form (a verb with both due appears twice).
-function buildReviewQueue() {
-  const q = [];
-  for (const v of VERBS) {
-    const p = store.progress[v.id];
-    if (!p) continue;
-    for (const which of dueForms(p)) q.push({ v, which });
-  }
-  return shuffle(q);
-}
-
-// "Trouble spots": verbs you keep missing (weighted by wrongs, low accuracy, low level).
-function troubleScore(v) {
-  const p = store.progress[v.id];
-  if (!p) return 0;
-  const wrongs = p.past.wrong + p.pp.wrong;
-  if (wrongs === 0) return 0;
-  // A verb is a "trouble spot" only while a missed form still sits below a stable level.
-  // Once correct answers lift it back to the gate, it counts as fixed and leaves the list.
-  if (minLvl(p) >= SCHEDULE_GATE) return 0;
-  const total = wrongs + p.past.correct + p.pp.correct;
-  const acc = total ? (p.past.correct + p.pp.correct) / total : 1;
-  return wrongs * 2 + (1 - acc) * 10 + (SCHEDULE_GATE - minLvl(p)) * 2;
-}
-function troubleList(n = 10) {
-  return VERBS.filter(v => troubleScore(v) > 0)
-    .sort((a, b) => troubleScore(b) - troubleScore(a))
-    .slice(0, n);
-}
-function troubleCount() { return VERBS.filter(v => troubleScore(v) > 0).length; }
 
 // ---- Mascot evolution (Tamagotchi-style, driven by level) ----
 // evoStageForLevel() now lives in src/core/leveling.js (imported above).
@@ -276,54 +242,15 @@ function show(screen) {
 }
 
 /* ============================================================
-   Spaced-repetition selection (Leitner-flavoured)
-   ============================================================ */
-function pickVerb(excludeId, newBudgetRef) {
-  const pool = [];
-  for (const v of VERBS) {
-    if (v.id === excludeId) continue;
-    const p = store.progress[v.id];
-    let weight;
-    if (!p) {
-      weight = newBudgetRef.left > 0 ? 8 : 0.2;   // gate how many new verbs appear
-    } else {
-      const m = minLvl(p);
-      weight = (FORM_MAX + 1 - m);                // weaker verbs -> higher priority
-      if (formDue(p.past) || formDue(p.pp)) weight *= 2.2;   // due for review -> surface it
-      else weight *= 0.3;                                    // not due -> show rarely
-      if (m >= STAGE_MIN.mastered) weight *= 0.6;            // mastered shows less (unless due)
-    }
-    if (weight > 0) pool.push({ v, weight });
-  }
-  if (!pool.length) return VERBS[Math.floor(Math.random() * VERBS.length)];
-  let total = pool.reduce((a, b) => a + b.weight, 0);
-  let r = Math.random() * total;
-  for (const item of pool) { r -= item.weight; if (r <= 0) {
-    if (!store.progress[item.v.id]) newBudgetRef.left--;
-    return item.v;
-  } }
-  return pool[pool.length - 1].v;
-}
-
-// Test the form that needs work most: prefer a due form, then the lower level.
-function chooseForm(v) {
-  const p = store.progress[v.id];
-  if (!p) return Math.random() < 0.5 ? 'past' : 'pp';
-  const need = (f) => (formDue(f) ? 100 : 0) + (FORM_MAX - f.lvl);
-  const np = need(p.past), npp = need(p.pp);
-  if (np === npp) return Math.random() < 0.5 ? 'past' : 'pp';
-  return np > npp ? 'past' : 'pp';
-}
-
-/* ============================================================
    Session / gameplay
+   (pickVerb / chooseForm / buildReviewQueue live in src/core/selection.js)
    ============================================================ */
 function startSession(mode, customQueue) {
   // Only the four game modes count toward the "played all modes" achievement.
   if (['pick', 'type', 'match', 'speed'].includes(mode)) store.stats.modesPlayed[mode] = true;
   let queue = customQueue || null, total = store.settings.dailyGoal || 10;
   if (mode === 'review') {
-    queue = buildReviewQueue();
+    queue = shuffle(buildReviewQueue(VERBS, store));
     if (!queue.length) { show('home'); return; }   // nothing due — safety
   }
   if (queue) total = Math.min(queue.length, 30);
@@ -365,13 +292,13 @@ function nextQuestion() {
     const item = session.queue[session.index];
     v = item.v; which = item.which || null;
   } else {
-    v = pickVerb(session.lastId, session.newBudget);
+    v = pickVerb(VERBS, store, session.lastId, session.newBudget);
     session.lastId = v.id;
   }
   if (session.mode === 'match') {
     session.q = { kind: 'translate', v, answer: v.ru.join(', ') };
   } else {
-    which = which || chooseForm(v);   // test the form that needs it most
+    which = which || chooseForm(v, store);   // test the form that needs it most
     session.q = { kind: 'form', v, which, answer: v[which] };
   }
   renderQuestion();
@@ -657,7 +584,7 @@ function endSession() {
   setResultLabels('correct', 'accuracy', 'XP');
   renderResultUnlocks(evolved, unlocks);
   if (session.mode === 'trouble') {
-    const left = troubleCount();
+    const left = troubleCount(VERBS, store);
     const d = document.createElement('div'); d.className = 'unlock-pill';
     d.textContent = left === 0 ? '🎉 All trouble spots cleared!' : `🛠️ ${left} verb${left > 1 ? 's' : ''} still to fix`;
     $('#results-unlocks').appendChild(d);
@@ -944,7 +871,7 @@ function renderHome() {
   banner.classList.toggle('hidden', due === 0);
   if (due > 0) $('#review-count').textContent = due;
   // Trouble-spots banner at the bottom: the verbs being missed most
-  const tc = troubleCount();
+  const tc = troubleCount(VERBS, store);
   $('#trouble-banner').classList.toggle('hidden', tc === 0);
   if (tc > 0) $('#trouble-count').textContent = tc;
 }
@@ -1013,7 +940,7 @@ function renderStats() {
   ).join('');
 
   // Trouble spots: the verbs you keep missing.
-  const trouble = troubleList();
+  const trouble = troubleList(VERBS, store);
   $('#trouble-section').classList.toggle('hidden', trouble.length === 0);
   if (trouble.length) {
     $('#trouble-list').innerHTML = trouble.map(v => `<span class="trouble-chip">${v.base}</span>`).join('');
@@ -1338,7 +1265,7 @@ function wire() {
   $('#onb-back').onclick = onbBack;
   $('#onb-skip').onclick = finishOnboarding;
   $('#how-btn').onclick = () => openModal('How to play', howToPlayHTML());
-  const startTrouble = () => { const q = troubleList().map(v => ({ v })); if (q.length) startSession('trouble', q); };
+  const startTrouble = () => { const q = troubleList(VERBS, store).map(v => ({ v })); if (q.length) startSession('trouble', q); };
   $('#trouble-practice').onclick = startTrouble;
   $('#trouble-banner').onclick = startTrouble;
   $('#modal-close').onclick = closeModal;

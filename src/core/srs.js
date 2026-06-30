@@ -2,10 +2,13 @@
 // Per-form state shape: { lvl, due, peak, correct, wrong }.
 
 export const DAY = 86400000;
+export const FORM_MAX = 10;       // top per-form level
 export const SCHEDULE_GATE = 3;   // at lvl >= this, a form advances only when it's "due"
 // Days to wait after REACHING a level before the form is due again (index = level).
 // Fibonacci-flavoured, tuned so: Growing(5) ≈ 3–5d, Mastered(7) ≈ 7–10d, Champion(10) ≈ 3 weeks.
 export const INTERVAL_DAYS = [0, 0, 0, 1, 2, 3, 3, 4, 5, 6, 0];
+// Mastery-stage thresholds, read from the WEAKER of the two forms (min level).
+export const STAGE_MIN = { sprout: 3, growing: 5, mastered: 7, gold: 10 };
 
 export function newForm() { return { lvl: 0, due: 0, peak: 0, correct: 0, wrong: 0 }; }
 
