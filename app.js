@@ -1,10 +1,17 @@
 /* ============================================================
    Tense Titans — irregular verbs trainer (Phase 2)
-   Vanilla JS, no build step, offline PWA.
+   Vanilla JS, no build step, offline PWA. Loaded as an ES module.
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.8.10';
+// Pure leveling / rank / evolution math — extracted to a DOM-free, unit-tested module.
+import {
+  EVO_LEVELS, RANKS,
+  xpForLevel, levelFromXp, xpIntoLevel, xpForNextLevel,
+  evoStageForLevel, rankTitle,
+} from './src/core/leveling.js';
+
+const APP_VERSION = '1.8.11';
 const SCHEMA_VERSION = 6;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -28,7 +35,7 @@ const STAGES = [
   { key: 'gold',     emoji: '🌟', name: 'Champion', hint: 'Both lvl 10 — kept perfect for weeks' },
 ];
 // 6 illustrated evolution stages (images 1..6). Evolve every 2 levels -> stages 1..5.
-const EVO_LEVELS = [3, 5, 7, 9, 11];   // ~300 / 1500 / 6300 / 25500 / 102300 XP — a real climb
+// EVO_LEVELS now lives in src/core/leveling.js (imported above).
 const EVO_NAMES = ['Hatchling', 'Youngling', 'Adept', 'Warrior', 'Elder', 'Champion'];
 
 /* ---------- Catalog of cosmetics (safe to extend freely) ---------- */
@@ -235,16 +242,8 @@ function saveStore() {
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const todayKey = () => new Date().toISOString().slice(0, 10);
-// Levels cost progressively more: level L costs 100·2^(L-1) XP, so the cumulative
-// XP to REACH level L is 100·(2^(L-1) - 1)  ->  L1=0, L2=100, L3=300, L4=700, L5=1500…
-const xpForLevel = (L) => 100 * (Math.pow(2, L - 1) - 1);
-const levelFromXp = (xp) => { let L = 1; while (xpForLevel(L + 1) <= xp) L++; return L; };
-const xpIntoLevel = (xp) => xp - xpForLevel(levelFromXp(xp));            // XP within the current level
-const xpForNextLevel = (xp) => { const L = levelFromXp(xp); return xpForLevel(L + 1) - xpForLevel(L); }; // span of current level
-// Rank titles by level (cosmetic motivator).
-// One rank per evolution stage — rank advances on the same level milestones as the mascot (Lv 1/3/5/7/9/11).
-const RANKS = ['Novice', 'Apprentice', 'Squire', 'Knight', 'Champion', 'Titan'];
-function rankTitle(level) { return RANKS[evoStageForLevel(level)]; }
+// Leveling math (xpForLevel / levelFromXp / xpIntoLevel / xpForNextLevel) and
+// rank titles (RANKS / rankTitle) now live in src/core/leveling.js (imported above).
 
 function newForm() { return { lvl: 0, due: 0, peak: 0, correct: 0, wrong: 0 }; }
 function prog(id) {
@@ -333,11 +332,7 @@ function troubleList(n = 10) {
 function troubleCount() { return VERBS.filter(v => troubleScore(v) > 0).length; }
 
 // ---- Mascot evolution (Tamagotchi-style, driven by level) ----
-function evoStageForLevel(level) {
-  let stage = 0;
-  for (const lv of EVO_LEVELS) if (level >= lv) stage++;
-  return stage; // 0..3
-}
+// evoStageForLevel() now lives in src/core/leveling.js (imported above).
 function currentEvoStage() { return evoStageForLevel(levelFromXp(store.stats.xp)); }
 function mascotDef() { return MASCOTS.find(m => m.id === store.settings.mascot) || MASCOTS[0]; }
 function mascotFormEmoji(stage) { return mascotDef().forms[stage] || mascotDef().emoji; }
