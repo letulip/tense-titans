@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.8.8';
+const APP_VERSION = '1.8.9';
 const SCHEMA_VERSION = 6;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -310,9 +310,12 @@ function troubleScore(v) {
   if (!p) return 0;
   const wrongs = p.past.wrong + p.pp.wrong;
   if (wrongs === 0) return 0;
+  // A verb is a "trouble spot" only while a missed form still sits below a stable level.
+  // Once correct answers lift it back to the gate, it counts as fixed and leaves the list.
+  if (minLvl(p) >= SCHEDULE_GATE) return 0;
   const total = wrongs + p.past.correct + p.pp.correct;
   const acc = total ? (p.past.correct + p.pp.correct) / total : 1;
-  return wrongs * 2 + (1 - acc) * 10 + (FORM_MAX - minLvl(p)) * 0.5;
+  return wrongs * 2 + (1 - acc) * 10 + (SCHEDULE_GATE - minLvl(p)) * 2;
 }
 function troubleList(n = 10) {
   return VERBS.filter(v => troubleScore(v) > 0)
@@ -606,19 +609,27 @@ function handleAnswer(given, el) {
       f.correct++;
       if (recall) store.stats.typeCorrect++;
       addXp(recall || session.mode === 'trouble' ? 15 : 10);   // fixing mistakes pays a bonus
-      const modeCap = recall ? FORM_MAX : PICK_FORM_CAP;
-      if (f.lvl >= modeCap) {
-        hint = !recall ? 'Switch to ⌨️ Type it to level up!' : '';
-      } else if (f.lvl >= SCHEDULE_GATE && Date.now() < (f.due || 0)) {
-        hint = 'Counts! Comes back for review later ⏳';
+      if (session.mode === 'trouble') {
+        // Focused drill: a correct recall lifts the weak form back to the stable gate,
+        // so a fixed verb actually drops off the trouble list.
+        if (f.lvl < SCHEDULE_GATE) { f.lvl = SCHEDULE_GATE; f.peak = Math.max(f.peak, f.lvl); }
+        f.due = Date.now() + (INTERVAL_DAYS[f.lvl] || 0) * DAY;
+        hint = minLvl(p) >= SCHEDULE_GATE ? '✅ Fixed!' : 'Good — its other form still needs a fix';
       } else {
-        f.lvl++;
-        f.peak = Math.max(f.peak, f.lvl);
-        let wait = INTERVAL_DAYS[f.lvl] || 0;
-        if (f.lvl < f.peak) wait = Math.ceil(wait / 2);
-        f.due = Date.now() + wait * DAY;
-        if (minLvl(p) === STAGE_MIN.mastered) hint = '🌳 Mastered!';
-        else if (minLvl(p) === STAGE_MIN.gold) hint = '🌟 Champion verb!';
+        const modeCap = recall ? FORM_MAX : PICK_FORM_CAP;
+        if (f.lvl >= modeCap) {
+          hint = !recall ? 'Switch to ⌨️ Type it to level up!' : '';
+        } else if (f.lvl >= SCHEDULE_GATE && Date.now() < (f.due || 0)) {
+          hint = 'Counts! Comes back for review later ⏳';
+        } else {
+          f.lvl++;
+          f.peak = Math.max(f.peak, f.lvl);
+          let wait = INTERVAL_DAYS[f.lvl] || 0;
+          if (f.lvl < f.peak) wait = Math.ceil(wait / 2);
+          f.due = Date.now() + wait * DAY;
+          if (minLvl(p) === STAGE_MIN.mastered) hint = '🌳 Mastered!';
+          else if (minLvl(p) === STAGE_MIN.gold) hint = '🌟 Champion verb!';
+        }
       }
     } else {
       f.wrong++; f.lvl = Math.max(0, f.lvl - 2); f.due = Date.now();
@@ -650,14 +661,18 @@ function handleAnswer(given, el) {
   const blank = $('#blank');
   if (blank) { blank.textContent = answer; blank.classList.add('filled'); if (!ok) blank.classList.add('wrong'); }
 
-  if (q.kind === 'translate' || session.mode === 'pick' || session.mode === 'speed') {
-    $$('.opt-btn').forEach(b => {
-      b.disabled = true;
-      const isAns = q.kind === 'translate' ? b.textContent === answer : isCorrect(b.textContent, answer);
-      if (isAns) b.classList.add('correct');
-      else if (b === el && !ok) b.classList.add('wrong');
-    });
-  }
+  // Any multiple-choice mode (pick / speed / match / trouble): mark the right option, flag the wrong pick.
+  $$('.opt-btn').forEach(b => {
+    b.disabled = true;
+    const isAns = q.kind === 'translate' ? b.textContent === answer : isCorrect(b.textContent, answer);
+    if (isAns) b.classList.add('correct');
+    else if (b === el && !ok) b.classList.add('wrong');
+  });
+  // Type / review: lock the field and drop the now-useless Check button (Next takes over).
+  const checkBtn = $('.check-btn');
+  if (checkBtn) checkBtn.classList.add('hidden');
+  const typedInput = $('.type-input');
+  if (typedInput) typedInput.disabled = true;
 
   checkAchievements();
   saveStore();
@@ -760,6 +775,12 @@ function endSession() {
   $('#results-xp').textContent = '+' + session.gainedXp;
   setResultLabels('correct', 'accuracy', 'XP');
   renderResultUnlocks(evolved, unlocks);
+  if (session.mode === 'trouble') {
+    const left = troubleCount();
+    const d = document.createElement('div'); d.className = 'unlock-pill';
+    d.textContent = left === 0 ? '🎉 All trouble spots cleared!' : `🛠️ ${left} verb${left > 1 ? 's' : ''} still to fix`;
+    $('#results-unlocks').appendChild(d);
+  }
   if (perfect) confettiBurst(40);
   show('results');
 }
