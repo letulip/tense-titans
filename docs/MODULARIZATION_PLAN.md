@@ -171,3 +171,49 @@ Trade-off to accept consciously: this adds `node_modules` + a build command **fo
 The "no build step" promise still holds for *development* (raw files run as-is); *releases* gain an
 optional optimization pass. If even one dependency feels like too much, a zero-dep fallback is to
 minify CSS with a tiny regex pass and ship JS unminified — but esbuild is the pragmatic choice.
+
+## 11. Store durability & backward-compat safeguards
+
+The saved store is a child's accumulated progress — losing it is the worst bug we could ship.
+This section captures what already protects it, the gaps, and the safeguards + tests to add.
+
+### Already guaranteed (keep it this way)
+- Migrations are **sequential and additive**; `fillDefaults` only fills missing fields and never
+  drops user data. Covered by `test/store-migrate.test.js` (v1→v6 chain, 9 cases).
+- The service worker versions the **code** cache only — it never touches `localStorage`.
+- Corrupt JSON on load is backed up to `verbquest.store.broken` before a fresh start.
+- Verb ids are stable (the base form), so progress never re-keys.
+
+### Gaps to close (prioritized)
+1. **Pre-migration backup (highest value, cheap).** On load, *before* saving a migrated store whose
+   `schemaVersion` changed, snapshot the raw original to `verbquest.store.bak` (keep the last 1–2).
+   Insurance against a future migration bug: the original is always recoverable, not overwritten.
+2. **Make import non-destructive (highest risk today).** `importData` currently does
+   `store = migrate(data)` and saves, with only a `typeof === 'object'` check — one wrong file wipes
+   progress. Add: (a) **shape validation** (must look like a TT store: has `progress`, `stats`, and a
+   numeric `schemaVersion`); (b) **back up the current store** to `verbquest.store.bak` before
+   overwriting; (c) a confirm step when the current store already has real progress.
+3. **Schema-downgrade guard.** If a loaded store's `schemaVersion` is **higher** than the code's
+   (stale SW serving old code after a newer version ran), don't silently downgrade: keep the data,
+   leave unknown fields intact (fillDefaults already preserves them), and log it rather than rewriting
+   `schemaVersion` down.
+4. **Surface save failures.** `saveStore` swallows quota/`localStorage` errors — at least toast once
+   so a child notices progress isn't saving.
+
+### Tests to add (`test/store-durability.test.js`)
+- **Round-trip:** `migrate(export(store))` deep-equals a sensible store — export→import loses nothing.
+- **Import validation:** garbage / wrong-shape objects are rejected (a helper `looksLikeStore(data)`),
+  while a real exported store is accepted.
+- **Real fixture:** a captured production store (anonymised) under `test/fixtures/` migrates cleanly
+  and keeps its xp / achievements / per-verb levels — this is the regression net for *future* migrations.
+- **Backup behaviour:** migrating a schema-changing store writes the pre-migration snapshot.
+
+### Discipline rule (also in CLAUDE.md)
+Every **new migration** ships in the same PR as: (a) a test of the prior→new transition, and
+(b) if the shape changes materially, an updated/added real fixture. Never change a migration that has
+already shipped — only add the next `if (s.schemaVersion < N)` step.
+
+### Suggested order
+Do **(2) import safety** and **(1) pre-migration backup** first — they protect real users now and are
+small. They can land as one focused PR with `test/store-durability.test.js`, independent of the module
+split.

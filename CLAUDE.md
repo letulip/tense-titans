@@ -30,6 +30,8 @@ Built for a ~12-year-old learner: short, game-like, rewarding — not a second t
 - Updates must never break an existing player's `localStorage` store or records.
 - `fillDefaults()` only fills missing fields — it never drops user data. Migrations are sequential and additive.
 - Verb ids are stable (the key is the base form). Never renumber/rename ids.
+- **Never edit a migration that has already shipped** — only add the next `if (s.schemaVersion < N)` step.
+- Every new migration ships in the same PR as a test of the prior→new transition (`test/store-migrate.test.js`); if the shape changes materially, add/update a real fixture. See `docs/MODULARIZATION_PLAN.md` §11 for the planned durability safeguards (pre-migration backup, non-destructive import).
 
 ### Data conventions
 - Verbs with multiple valid forms are stored slash-joined: `"was/were"`, `"burnt/burned"`, pp `"got/gotten"`. `isCorrect()` accepts any single form, the whole token, or all forms in any order; matching is letters-only normalized.
