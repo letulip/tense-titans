@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.8.7';
+const APP_VERSION = '1.8.10';
 const SCHEMA_VERSION = 6;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -59,31 +59,57 @@ const VOICE_PRESETS = [
 ];
 const SPEED_SECONDS = 60;        // Speed round length
 // hidden: true -> shown as "???" until earned
+// Achievements are grouped into categories (shown as sections on the Achievements screen).
+const ACH_CATS = [
+  { id: 'progress',  name: '📈 Progress' },
+  { id: 'modes',     name: '🎮 Game modes' },
+  { id: 'challenge', name: '🏅 Challenges' },
+];
 const ACHIEVEMENTS = [
-  { id: 'first',       ico: '👣', name: 'First steps',  desc: 'Answer your first verb' },
-  { id: 'correct10',   ico: '✅', name: 'Getting it',   desc: '10 correct answers' },
-  { id: 'correct50',   ico: '💪', name: 'On a roll',    desc: '50 correct answers' },
-  { id: 'correct100',  ico: '🎯', name: 'Centurion',    desc: '100 correct answers' },
-  { id: 'streak3',     ico: '🔥', name: '3-day streak', desc: 'Practice 3 days in a row' },
-  { id: 'streak7',     ico: '🌟', name: 'Week warrior', desc: 'Practice 7 days in a row' },
-  { id: 'streak14',    ico: '📅', name: 'Fortnight',    desc: 'Practice 14 days in a row' },
-  { id: 'mastered10',  ico: '🌳', name: 'Green thumb',  desc: 'Master 10 verbs' },
-  { id: 'mastered25',  ico: '🏆', name: 'Verb master',  desc: 'Master 25 verbs' },
-  { id: 'champion1',   ico: '👑', name: 'Legend',       desc: 'Get your first 🌟 Champion verb' },
-  { id: 'perfect',     ico: '💯', name: 'Flawless',     desc: 'A perfect session' },
-  { id: 'type50',      ico: '⌨️', name: 'Touch typist', desc: '50 correct in Type it' },
-  { id: 'match25',     ico: '🌍', name: 'Translator',   desc: '25 correct in Match' },
-  { id: 'speed15',     ico: '⚡', name: 'Speed demon',  desc: 'Score 15+ in a Speed round' },
-  { id: 'speed25',     ico: '🚀', name: 'Lightning',    desc: 'Score 25+ in a Speed round' },
-  { id: 'combo10',     ico: '🔗', name: 'Combo master', desc: '10-answer combo in Speed' },
-  { id: 'allModes',    ico: '🎮', name: 'Jack of all',  desc: 'Play all four game modes' },
-  { id: 'level10',     ico: '🎖️', name: 'Veteran',      desc: 'Reach level 7' },
-  // ---- hidden ----
-  { id: 'nightOwl',    ico: '🦉', name: 'Night Owl',    desc: 'Practice late at night', hidden: true },
-  { id: 'earlyBird',   ico: '🐤', name: 'Early Bird',   desc: 'Practice early in the morning', hidden: true },
-  { id: 'comeback',    ico: '💖', name: 'Comeback Kid', desc: 'Return after a week away', hidden: true },
-  { id: 'flawlessSpd', ico: '🛡️', name: 'Untouchable',  desc: 'Speed round 15+ with zero misses', hidden: true },
-  { id: 'polyglot',    ico: '🗺️', name: 'Polyglot',     desc: '50 correct in Match', hidden: true },
+  // --- Progress ---
+  { id: 'first',       cat: 'progress', ico: '👣', name: 'First steps',  desc: 'Answer your first verb' },
+  { id: 'correct10',   cat: 'progress', ico: '✅', name: 'Getting it',   desc: '10 correct answers' },
+  { id: 'correct50',   cat: 'progress', ico: '💪', name: 'On a roll',    desc: '50 correct answers' },
+  { id: 'correct100',  cat: 'progress', ico: '🎯', name: 'Centurion',    desc: '100 correct answers' },
+  { id: 'correct250',  cat: 'progress', ico: '🎓', name: 'Scholar',      desc: '250 correct answers' },
+  { id: 'correct500',  cat: 'progress', ico: '🧠', name: 'Verb genius',  desc: '500 correct answers' },
+  { id: 'streak3',     cat: 'progress', ico: '🔥', name: '3-day streak', desc: 'Practice 3 days in a row' },
+  { id: 'streak7',     cat: 'progress', ico: '🌟', name: 'Week warrior', desc: 'Practice 7 days in a row' },
+  { id: 'streak14',    cat: 'progress', ico: '📅', name: 'Fortnight',    desc: 'Practice 14 days in a row' },
+  { id: 'streak30',    cat: 'progress', ico: '🗓️', name: 'Unstoppable',  desc: 'Practice 30 days in a row' },
+  { id: 'mastered10',  cat: 'progress', ico: '🌳', name: 'Green thumb',  desc: 'Master 10 verbs' },
+  { id: 'mastered25',  cat: 'progress', ico: '🏆', name: 'Verb master',  desc: 'Master 25 verbs' },
+  { id: 'mastered50',  cat: 'progress', ico: '🌲', name: 'Forest keeper', desc: 'Master 50 verbs' },
+  { id: 'masteredAll', cat: 'progress', ico: '📚', name: 'Completionist', desc: 'Master all 150 verbs' },
+  { id: 'champion1',   cat: 'progress', ico: '👑', name: 'Legend',       desc: 'Get your first 🌟 Champion verb' },
+  { id: 'champion10',  cat: 'progress', ico: '💎', name: 'Hall of fame', desc: 'Get 10 🌟 Champion verbs' },
+  { id: 'level10',     cat: 'progress', ico: '🎖️', name: 'Veteran',      desc: 'Reach level 7' },
+  { id: 'levelTen',    cat: 'progress', ico: '🏅', name: 'Double digits', desc: 'Reach level 10' },
+  // --- Game modes ---
+  { id: 'type50',      cat: 'modes', ico: '⌨️', name: 'Touch typist', desc: '50 correct in Type it' },
+  { id: 'type100',     cat: 'modes', ico: '📝', name: 'Wordsmith',    desc: '100 correct in Type it' },
+  { id: 'match25',     cat: 'modes', ico: '🌍', name: 'Translator',   desc: '25 correct in Match' },
+  { id: 'match100',    cat: 'modes', ico: '🌐', name: 'Globetrotter', desc: '100 correct in Match' },
+  { id: 'speed15',     cat: 'modes', ico: '⚡', name: 'Speed demon',  desc: 'Score 15+ in a Speed round' },
+  { id: 'speed25',     cat: 'modes', ico: '🚀', name: 'Lightning',    desc: 'Score 25+ in a Speed round' },
+  { id: 'speed35',     cat: 'modes', ico: '🛸', name: 'Supersonic',   desc: 'Score 35+ in a Speed round' },
+  { id: 'combo10',     cat: 'modes', ico: '🔗', name: 'Combo master', desc: '10-answer combo in Speed' },
+  { id: 'combo20',     cat: 'modes', ico: '⛓️', name: 'Unbroken',     desc: '20-answer combo in Speed' },
+  { id: 'allModes',    cat: 'modes', ico: '🎮', name: 'Jack of all',  desc: 'Play all four game modes' },
+  { id: 'polyglot',    cat: 'modes', ico: '🗺️', name: 'Polyglot',     desc: '50 correct in Match', hidden: true },
+  { id: 'flawlessSpd', cat: 'modes', ico: '🛡️', name: 'Untouchable',  desc: 'Speed round 15+ with zero misses', hidden: true },
+  // --- Challenges ---
+  { id: 'perfect',     cat: 'challenge', ico: '💯', name: 'Flawless',     desc: 'A perfect session' },
+  { id: 'bigday',      cat: 'challenge', ico: '🏃', name: 'Marathon',     desc: 'Answer 50 verbs in one day' },
+  { id: 'evoMax',      cat: 'challenge', ico: '🐉', name: 'Final form',   desc: 'Evolve your mascot to the max' },
+  { id: 'fixer',       cat: 'challenge', ico: '🔧', name: 'Mistake mender', desc: 'Clear a Trouble session with no misses' },
+  { id: 'collector',   cat: 'challenge', ico: '🎨', name: 'Collector',    desc: 'Unlock every theme & mascot' },
+  { id: 'nightOwl',    cat: 'challenge', ico: '🦉', name: 'Night Owl',    desc: 'Practice late at night', hidden: true },
+  { id: 'earlyBird',   cat: 'challenge', ico: '🐤', name: 'Early Bird',   desc: 'Practice early in the morning', hidden: true },
+  { id: 'comeback',    cat: 'challenge', ico: '💖', name: 'Comeback Kid', desc: 'Return after a week away', hidden: true },
+  { id: 'perfectType', cat: 'challenge', ico: '✍️', name: 'Spotless',     desc: 'A perfect Type it session', hidden: true },
+  { id: 'reviewZero',  cat: 'challenge', ico: '📭', name: 'Inbox zero',   desc: 'Clear every verb due for review', hidden: true },
+  { id: 'owlAndBird',  cat: 'challenge', ico: '🌗', name: 'Round the clock', desc: 'Practice both late night and early morning', hidden: true },
 ];
 
 /* ---------- State ---------- */
@@ -292,9 +318,12 @@ function troubleScore(v) {
   if (!p) return 0;
   const wrongs = p.past.wrong + p.pp.wrong;
   if (wrongs === 0) return 0;
+  // A verb is a "trouble spot" only while a missed form still sits below a stable level.
+  // Once correct answers lift it back to the gate, it counts as fixed and leaves the list.
+  if (minLvl(p) >= SCHEDULE_GATE) return 0;
   const total = wrongs + p.past.correct + p.pp.correct;
   const acc = total ? (p.past.correct + p.pp.correct) / total : 1;
-  return wrongs * 2 + (1 - acc) * 10 + (FORM_MAX - minLvl(p)) * 0.5;
+  return wrongs * 2 + (1 - acc) * 10 + (SCHEDULE_GATE - minLvl(p)) * 2;
 }
 function troubleList(n = 10) {
   return VERBS.filter(v => troubleScore(v) > 0)
@@ -588,19 +617,27 @@ function handleAnswer(given, el) {
       f.correct++;
       if (recall) store.stats.typeCorrect++;
       addXp(recall || session.mode === 'trouble' ? 15 : 10);   // fixing mistakes pays a bonus
-      const modeCap = recall ? FORM_MAX : PICK_FORM_CAP;
-      if (f.lvl >= modeCap) {
-        hint = !recall ? 'Switch to ⌨️ Type it to level up!' : '';
-      } else if (f.lvl >= SCHEDULE_GATE && Date.now() < (f.due || 0)) {
-        hint = 'Counts! Comes back for review later ⏳';
+      if (session.mode === 'trouble') {
+        // Focused drill: a correct recall lifts the weak form back to the stable gate,
+        // so a fixed verb actually drops off the trouble list.
+        if (f.lvl < SCHEDULE_GATE) { f.lvl = SCHEDULE_GATE; f.peak = Math.max(f.peak, f.lvl); }
+        f.due = Date.now() + (INTERVAL_DAYS[f.lvl] || 0) * DAY;
+        hint = minLvl(p) >= SCHEDULE_GATE ? '✅ Fixed!' : 'Good — its other form still needs a fix';
       } else {
-        f.lvl++;
-        f.peak = Math.max(f.peak, f.lvl);
-        let wait = INTERVAL_DAYS[f.lvl] || 0;
-        if (f.lvl < f.peak) wait = Math.ceil(wait / 2);
-        f.due = Date.now() + wait * DAY;
-        if (minLvl(p) === STAGE_MIN.mastered) hint = '🌳 Mastered!';
-        else if (minLvl(p) === STAGE_MIN.gold) hint = '🌟 Champion verb!';
+        const modeCap = recall ? FORM_MAX : PICK_FORM_CAP;
+        if (f.lvl >= modeCap) {
+          hint = !recall ? 'Switch to ⌨️ Type it to level up!' : '';
+        } else if (f.lvl >= SCHEDULE_GATE && Date.now() < (f.due || 0)) {
+          hint = 'Counts! Comes back for review later ⏳';
+        } else {
+          f.lvl++;
+          f.peak = Math.max(f.peak, f.lvl);
+          let wait = INTERVAL_DAYS[f.lvl] || 0;
+          if (f.lvl < f.peak) wait = Math.ceil(wait / 2);
+          f.due = Date.now() + wait * DAY;
+          if (minLvl(p) === STAGE_MIN.mastered) hint = '🌳 Mastered!';
+          else if (minLvl(p) === STAGE_MIN.gold) hint = '🌟 Champion verb!';
+        }
       }
     } else {
       f.wrong++; f.lvl = Math.max(0, f.lvl - 2); f.due = Date.now();
@@ -632,14 +669,18 @@ function handleAnswer(given, el) {
   const blank = $('#blank');
   if (blank) { blank.textContent = answer; blank.classList.add('filled'); if (!ok) blank.classList.add('wrong'); }
 
-  if (q.kind === 'translate' || session.mode === 'pick' || session.mode === 'speed') {
-    $$('.opt-btn').forEach(b => {
-      b.disabled = true;
-      const isAns = q.kind === 'translate' ? b.textContent === answer : isCorrect(b.textContent, answer);
-      if (isAns) b.classList.add('correct');
-      else if (b === el && !ok) b.classList.add('wrong');
-    });
-  }
+  // Any multiple-choice mode (pick / speed / match / trouble): mark the right option, flag the wrong pick.
+  $$('.opt-btn').forEach(b => {
+    b.disabled = true;
+    const isAns = q.kind === 'translate' ? b.textContent === answer : isCorrect(b.textContent, answer);
+    if (isAns) b.classList.add('correct');
+    else if (b === el && !ok) b.classList.add('wrong');
+  });
+  // Type / review: lock the field and drop the now-useless Check button (Next takes over).
+  const checkBtn = $('.check-btn');
+  if (checkBtn) checkBtn.classList.add('hidden');
+  const typedInput = $('.type-input');
+  if (typedInput) typedInput.disabled = true;
 
   checkAchievements();
   saveStore();
@@ -725,6 +766,9 @@ function endSession() {
   const acc = session.total ? Math.round(session.correct / session.total * 100) : 0;
   const perfect = session.correct === session.total && session.total > 0;
   if (perfect) { addXp(20); unlockAchievement('perfect'); }
+  if (perfect && session.mode === 'trouble') unlockAchievement('fixer');
+  if (perfect && session.mode === 'type') unlockAchievement('perfectType');
+  if (session.mode === 'review' && dueCount() === 0) unlockAchievement('reviewZero');
   const { unlocks, evolved } = collectRewards();
   saveStore();
 
@@ -739,6 +783,12 @@ function endSession() {
   $('#results-xp').textContent = '+' + session.gainedXp;
   setResultLabels('correct', 'accuracy', 'XP');
   renderResultUnlocks(evolved, unlocks);
+  if (session.mode === 'trouble') {
+    const left = troubleCount();
+    const d = document.createElement('div'); d.className = 'unlock-pill';
+    d.textContent = left === 0 ? '🎉 All trouble spots cleared!' : `🛠️ ${left} verb${left > 1 ? 's' : ''} still to fix`;
+    $('#results-unlocks').appendChild(d);
+  }
   if (perfect) confettiBurst(40);
   show('results');
 }
@@ -783,24 +833,40 @@ function checkAchievements() {
   if (st.totalCorrect >= 10) unlockAchievement('correct10');
   if (st.totalCorrect >= 50) unlockAchievement('correct50');
   if (st.totalCorrect >= 100) unlockAchievement('correct100');
+  if (st.totalCorrect >= 250) unlockAchievement('correct250');
+  if (st.totalCorrect >= 500) unlockAchievement('correct500');
   if (st.dayStreak >= 3) unlockAchievement('streak3');
   if (st.dayStreak >= 7) unlockAchievement('streak7');
   if (st.dayStreak >= 14) unlockAchievement('streak14');
+  if (st.dayStreak >= 30) unlockAchievement('streak30');
   const mc = masteredCount();
   if (mc >= 10) unlockAchievement('mastered10');
   if (mc >= 25) unlockAchievement('mastered25');
-  if (championCount() >= 1) unlockAchievement('champion1');
+  if (mc >= 50) unlockAchievement('mastered50');
+  if (mc >= VERBS.length && VERBS.length > 0) unlockAchievement('masteredAll');
+  const cc = championCount();
+  if (cc >= 1) unlockAchievement('champion1');
+  if (cc >= 10) unlockAchievement('champion10');
   if ((st.typeCorrect || 0) >= 50) unlockAchievement('type50');
+  if ((st.typeCorrect || 0) >= 100) unlockAchievement('type100');
   if ((st.matchCorrect || 0) >= 25) unlockAchievement('match25');
   if ((st.matchCorrect || 0) >= 50) unlockAchievement('polyglot');
+  if ((st.matchCorrect || 0) >= 100) unlockAchievement('match100');
   if ((st.speedBest || 0) >= 15) unlockAchievement('speed15');
   if ((st.speedBest || 0) >= 25) unlockAchievement('speed25');
+  if ((st.speedBest || 0) >= 35) unlockAchievement('speed35');
   if ((st.maxCombo || 0) >= 10) unlockAchievement('combo10');
+  if ((st.maxCombo || 0) >= 20) unlockAchievement('combo20');
   if ((st.speedBestClean || 0) >= 15) unlockAchievement('flawlessSpd');
   if (Object.keys(st.modesPlayed || {}).length >= 4) unlockAchievement('allModes');
   if (levelFromXp(st.xp) >= 7) unlockAchievement('level10');
+  if (levelFromXp(st.xp) >= 10) unlockAchievement('levelTen');
+  if ((st.history[todayKey()] || 0) >= 50) unlockAchievement('bigday');
+  if (currentEvoStage() >= EVO_NAMES.length - 1) unlockAchievement('evoMax');
+  if (cosmeticList().every(isUnlocked)) unlockAchievement('collector');
   if (hour >= 22 || hour < 5) unlockAchievement('nightOwl');
   if (hour >= 5 && hour < 8) unlockAchievement('earlyBird');
+  if (store.achievements.nightOwl && store.achievements.earlyBird) unlockAchievement('owlAndBird');
   if (store.flags && store.flags.comebackPending) unlockAchievement('comeback');
 }
 
@@ -1109,15 +1175,24 @@ function renderAchievements() {
   const got = ACHIEVEMENTS.filter(a => store.achievements[a.id]).length;
   $('#ach-progress-text').textContent = got + ' / ' + ACHIEVEMENTS.length + ' unlocked';
   $('#ach-progress-fill').style.width = (got / ACHIEVEMENTS.length * 100) + '%';
-  for (const a of ACHIEVEMENTS) {
-    const on = !!store.achievements[a.id];
-    const secret = a.hidden && !on;
-    const d = document.createElement('div');
-    d.className = 'ach' + (on ? ' unlocked' : '') + (a.hidden ? ' secret' : '');
-    d.innerHTML = `<div class="ico">${on ? a.ico : (secret ? '❓' : '🔒')}</div>
-      <div class="name">${secret ? '???' : a.name}</div>
-      <div class="desc">${secret ? 'Hidden — keep playing!' : a.desc}</div>`;
-    grid.appendChild(d);
+  for (const cat of ACH_CATS) {
+    const items = ACHIEVEMENTS.filter(a => a.cat === cat.id);
+    if (!items.length) continue;
+    const gotInCat = items.filter(a => store.achievements[a.id]).length;
+    const head = document.createElement('div');
+    head.className = 'ach-cat-head';
+    head.innerHTML = `<span>${cat.name}</span><small>${gotInCat}/${items.length}</small>`;
+    grid.appendChild(head);
+    for (const a of items) {
+      const on = !!store.achievements[a.id];
+      const secret = a.hidden && !on;
+      const d = document.createElement('div');
+      d.className = 'ach' + (on ? ' unlocked' : '') + (a.hidden ? ' secret' : '');
+      d.innerHTML = `<div class="ico">${on ? a.ico : (secret ? '❓' : '🔒')}</div>
+        <div class="name">${secret ? '???' : a.name}</div>
+        <div class="desc">${secret ? 'Hidden — keep playing!' : a.desc}</div>`;
+      grid.appendChild(d);
+    }
   }
 }
 
