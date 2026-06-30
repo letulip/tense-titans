@@ -295,6 +295,17 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .onb-mascot-opt.locked { opacity: .55; cursor: not-allowed; }
 .om-emoji { font-size: 34px; }
 .om-name { font-size: 12px; color: var(--muted); }
+/* Language picker — onboarding (grid) + settings (wrap row) */
+.onb-langs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.onb-lang-opt { background: var(--surface); border: 2px solid var(--border); border-radius: 14px; padding: 12px 6px; cursor: pointer; color: var(--text); display: flex; flex-direction: column; gap: 4px; align-items: center; }
+.onb-lang-opt.active { border-color: var(--accent-2); background: var(--surface-2); }
+.ol-flag { font-size: 30px; }
+.ol-name { font-size: 12px; color: var(--muted); }
+.lang-picker { display: flex; gap: 8px; flex-wrap: wrap; }
+.lang-opt { background: var(--surface); border: 2px solid var(--border); border-radius: 12px; padding: 6px 10px; cursor: pointer; color: var(--text); display: flex; align-items: center; gap: 6px; }
+.lang-opt.active { border-color: var(--accent-2); background: var(--surface-2); }
+.lo-flag { font-size: 20px; }
+.lo-name { font-size: 13px; }
 .onb-presets { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 12px; }
 .onb-dots { display: flex; gap: 6px; justify-content: center; margin: 16px 0; }
 .onb-dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,.2); }

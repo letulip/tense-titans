@@ -22,7 +22,7 @@ import {
 import { earnedAchievements } from './src/core/achievements.js';
 import { reqMet, reqText } from './src/core/cosmetics.js';
 
-const APP_VERSION = '1.8.17';
+const APP_VERSION = '1.8.18';
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
 
@@ -66,6 +66,15 @@ const VOICE_PRESETS = [
   { id: 'robot',    name: '🤖 Robot',  rate: 0.8, pitch: 0.4 },
   { id: 'chipmunk', name: '🐿️ Chipmunk', rate: 1.4, pitch: 2.0 },
   { id: 'slowmo',   name: '🐢 Slow-mo', rate: 0.6, pitch: 1.0 },
+];
+// Translation languages the hero can choose. 'ru' lives in verbs.json; the rest in translations.json.
+const LANGUAGES = [
+  { code: 'ru', flag: '🇷🇺', name: 'Русский' },
+  { code: 'es', flag: '🇪🇸', name: 'Español' },
+  { code: 'fr', flag: '🇫🇷', name: 'Français' },
+  { code: 'de', flag: '🇩🇪', name: 'Deutsch' },
+  { code: 'zh', flag: '🇨🇳', name: '中文' },
+  { code: 'ar', flag: '🇸🇦', name: 'العربية', rtl: true },
 ];
 const SPEED_SECONDS = 60;        // Speed round length
 // hidden: true -> shown as "???" until earned
@@ -126,6 +135,7 @@ const ACHIEVEMENTS = [
 let VERBS = [];
 let verbById = {};
 let EXAMPLES = {};            // verbId -> [baseSentence, pastSentence, ppSentence] (form in *asterisks*)
+let TRANSLATIONS = {};       // verbId -> { es, fr, de, zh, ar } (ru stays in verbs.json)
 let store = null;
 let voices = [];
 let session = null;
@@ -170,6 +180,17 @@ function saveStore() {
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const todayKey = () => new Date().toISOString().slice(0, 10);
+
+// ---- Translations: the verb's meaning in the hero's chosen language (falls back to Russian) ----
+function langDef() { return LANGUAGES.find(l => l.code === (store.settings.lang || 'ru')) || LANGUAGES[0]; }
+function trList(v) {
+  const lang = store.settings.lang || 'ru';
+  if (lang === 'ru') return v.ru;
+  const t = TRANSLATIONS[v.id], val = t && t[lang];
+  return val ? [val] : v.ru;   // graceful fallback if a translation is missing
+}
+function trText(v) { return trList(v).join(', '); }
+
 // Leveling math (xpForLevel / levelFromXp / xpIntoLevel / xpForNextLevel) and
 // rank titles (RANKS / rankTitle) now live in src/core/leveling.js (imported above).
 
@@ -302,7 +323,7 @@ function nextQuestion() {
     session.lastId = v.id;
   }
   if (session.mode === 'match') {
-    session.q = { kind: 'translate', v, answer: v.ru.join(', ') };
+    session.q = { kind: 'translate', v, answer: trText(v) };
   } else {
     which = which || chooseForm(v, store);   // test the form that needs it most
     session.q = { kind: 'form', v, which, answer: v[which] };
@@ -321,7 +342,9 @@ function renderQuestion() {
   $('#example').classList.add('hidden');
   $('#next-btn').classList.add('hidden');
   $('#translation').classList.add('hidden');
-  $('#translation').textContent = v.ru.join(', ');
+  $('#translation').textContent = trText(v);
+  $('#translation').dir = langDef().rtl ? 'rtl' : 'ltr';
+  $('#translate-btn').textContent = langDef().flag;   // the hint button shows the chosen language's flag
   $('#translate-btn').classList.toggle('hidden', kind === 'translate'); // no hint button when translation IS the question
 
   if (kind === 'translate') {
@@ -369,13 +392,15 @@ function buildOptions(area) {
 
 function buildTranslateOptions(area) {
   const answer = session.q.answer;                 // correct ru joined
-  const others = VERBS.filter(x => x.id !== session.q.v.id).map(x => x.ru.join(', '));
+  const others = VERBS.filter(x => x.id !== session.q.v.id).map(x => trText(x));
   const opts = new Set([answer]);
   while (opts.size < 4 && others.length) opts.add(others[Math.floor(Math.random() * others.length)]);
+  const rtl = langDef().rtl;
   for (const opt of shuffle(Array.from(opts))) {
     const b = document.createElement('button');
     b.className = 'opt-btn ru';
     b.textContent = opt;
+    if (rtl) b.dir = 'rtl';
     b.onclick = () => handleAnswer(opt, b);
     area.appendChild(b);
   }
@@ -980,6 +1005,16 @@ function renderSettings() {
       : () => toast(`🔒 ${t.name} theme — ${reqText(t.req)}`);
     tp.appendChild(b);
   });
+  // translation language
+  const lp = $('#lang-picker'); lp.innerHTML = '';
+  LANGUAGES.forEach(l => {
+    const b = document.createElement('button');
+    b.className = 'lang-opt' + (s.lang === l.code ? ' active' : '');
+    b.innerHTML = `<span class="lo-flag">${l.flag}</span><span class="lo-name"${l.rtl ? ' dir="rtl"' : ''}>${l.name}</span>`;
+    b.title = l.name;
+    b.onclick = () => { s.lang = l.code; saveStore(); renderSettings(); };
+    lp.appendChild(b);
+  });
   // voice presets
   const pr = $('#preset-row'); pr.innerHTML = '';
   VOICE_PRESETS.forEach(p => {
@@ -1052,10 +1087,10 @@ function closeLightbox() { $('#lightbox').classList.add('hidden'); $('#lightbox-
 /* ============================================================
    Onboarding (first launch)
    ============================================================ */
-let onb = { step: 0, name: '', mascot: 'dragon', voiceURI: '' };
+let onb = { step: 0, name: '', mascot: 'dragon', voiceURI: '', lang: 'ru' };
 
 function startOnboarding() {
-  onb = { step: 0, name: store.settings.name || '', mascot: store.settings.mascot || 'dragon', voiceURI: store.settings.voiceURI || '' };
+  onb = { step: 0, name: store.settings.name || '', mascot: store.settings.mascot || 'dragon', voiceURI: store.settings.voiceURI || '', lang: store.settings.lang || 'ru' };
   $('#onboarding').classList.remove('hidden');
   renderOnboarding();
 }
@@ -1063,13 +1098,21 @@ function startOnboarding() {
 function onbSteps() {
   const adult = (m) => m.forms[2];
   return [
-    { // welcome
+    { key: 'welcome',
       html: `<img class="onb-logo" src="icons/logo.svg" alt="Tense Titans" />
         <h2>Welcome to Tense Titans!</h2>
         <p>Master English irregular verbs by playing. Let's set up your buddy — it takes 20 seconds.</p>`,
       next: 'Let\'s go',
     },
-    { // mascot
+    { key: 'lang',
+      html: `<div class="onb-mascot">🌍</div>
+        <h2>Your language</h2>
+        <p>Which language should we show word meanings in?</p>
+        <div class="onb-langs">${LANGUAGES.map(l => `<button class="onb-lang-opt${onb.lang === l.code ? ' active' : ''}" data-l="${l.code}">
+          <span class="ol-flag">${l.flag}</span><span class="ol-name"${l.rtl ? ' dir="rtl"' : ''}>${l.name}</span></button>`).join('')}</div>`,
+      next: 'Next',
+    },
+    { key: 'mascot',
       html: `<h2>Choose your buddy</h2>
         <p>It grows up and earns a crown as you level up! 🐲→🐉→👑</p>
         <div class="onb-mascots">${MASCOTS.map(m => {
@@ -1079,14 +1122,14 @@ function onbSteps() {
         }).join('')}</div>`,
       next: 'Next',
     },
-    { // name
+    { key: 'name',
       html: `<div class="onb-mascot">${adult(mascotById(onb.mascot))}</div>
         <h2>What's your name?</h2>
         <p>So your buddy knows who the hero is.</p>
         <input id="onb-name" class="onb-input" type="text" maxlength="12" placeholder="hero" value="${escapeAttr(onb.name)}">`,
       next: 'Next',
     },
-    { // voice
+    { key: 'voice',
       html: `<div class="onb-mascot">🔊</div>
         <h2>Pick a voice</h2>
         <p>Your buddy can read verbs out loud. Try the silly ones!</p>
@@ -1095,7 +1138,7 @@ function onbSteps() {
         <button id="onb-test" class="ghost-btn" style="margin-top:12px">🔊 Test</button>`,
       next: 'Next',
     },
-    { // how to play
+    { key: 'howto',
       html: `<h2>How to play</h2>${howToPlayHTML()}`,
       next: 'Start playing! 🚀',
     },
@@ -1112,19 +1155,22 @@ function renderOnboarding() {
   $('#onb-back').style.display = onb.step === 0 ? 'none' : '';
   $('#onb-dots').innerHTML = steps.map((_, i) => `<span class="onb-dot${i === onb.step ? ' on' : ''}"></span>`).join('');
 
-  // wire step-specific controls
-  if (onb.step === 1) {
+  // wire step-specific controls (by key, so steps can be reordered safely)
+  if (step.key === 'lang') {
+    $$('#onb-body .onb-lang-opt').forEach(b => b.onclick = () => { onb.lang = b.dataset.l; renderOnboarding(); });
+  }
+  if (step.key === 'mascot') {
     $$('#onb-body .onb-mascot-opt').forEach(b => b.onclick = () => {
       if (b.disabled) return;
       onb.mascot = b.dataset.m; renderOnboarding();
     });
   }
-  if (onb.step === 2) {
+  if (step.key === 'name') {
     const inp = $('#onb-name');
     inp.oninput = () => onb.name = inp.value;
     setTimeout(() => inp.focus(), 50);
   }
-  if (onb.step === 3) {
+  if (step.key === 'voice') {
     if (!voices.length) loadVoices();
     const vs = $('#onb-voice');
     if (!voices.length) { vs.innerHTML = '<option>No voices on this device</option>'; vs.disabled = true; }
@@ -1152,6 +1198,7 @@ function onbBack() { if (onb.step > 0) { onb.step--; renderOnboarding(); } }
 function finishOnboarding() {
   store.settings.name = (onb.name || '').trim();
   store.settings.mascot = onb.mascot;
+  store.settings.lang = onb.lang || 'ru';
   if (onb.voiceURI) store.settings.voiceURI = onb.voiceURI;
   store.flags.onboarded = true;
   saveStore();
@@ -1267,6 +1314,7 @@ async function boot() {
   }
   VERBS.forEach(v => verbById[v.id] = v);
   try { EXAMPLES = await (await fetch('examples.json')).json(); } catch (e) { EXAMPLES = {}; }  // optional; graceful if missing
+  try { TRANSLATIONS = await (await fetch('translations.json')).json(); } catch (e) { TRANSLATIONS = {}; }  // optional; falls back to ru
   decayAll();           // apply the forgetting curve for any time away
   markUnlocks();        // grant any cosmetics already earned under the new rules
   // "Comeback Kid": flag a long absence so the next answer unlocks it
