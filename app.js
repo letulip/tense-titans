@@ -4,7 +4,7 @@
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.8.7';
+const APP_VERSION = '1.8.8';
 const SCHEMA_VERSION = 6;        // bump + add a migration when store shape changes
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
@@ -78,12 +78,30 @@ const ACHIEVEMENTS = [
   { id: 'combo10',     ico: '🔗', name: 'Combo master', desc: '10-answer combo in Speed' },
   { id: 'allModes',    ico: '🎮', name: 'Jack of all',  desc: 'Play all four game modes' },
   { id: 'level10',     ico: '🎖️', name: 'Veteran',      desc: 'Reach level 7' },
+  { id: 'correct250',  ico: '🎓', name: 'Scholar',      desc: '250 correct answers' },
+  { id: 'correct500',  ico: '🧠', name: 'Verb genius',  desc: '500 correct answers' },
+  { id: 'mastered50',  ico: '🌲', name: 'Forest keeper', desc: 'Master 50 verbs' },
+  { id: 'masteredAll', ico: '📚', name: 'Completionist', desc: 'Master all 150 verbs' },
+  { id: 'champion10',  ico: '💎', name: 'Hall of fame', desc: 'Get 10 🌟 Champion verbs' },
+  { id: 'streak30',    ico: '🗓️', name: 'Unstoppable',  desc: 'Practice 30 days in a row' },
+  { id: 'levelTen',    ico: '🏅', name: 'Double digits', desc: 'Reach level 10' },
+  { id: 'type100',     ico: '📝', name: 'Wordsmith',    desc: '100 correct in Type it' },
+  { id: 'match100',    ico: '🌐', name: 'Globetrotter', desc: '100 correct in Match' },
+  { id: 'speed35',     ico: '🛸', name: 'Supersonic',   desc: 'Score 35+ in a Speed round' },
+  { id: 'combo20',     ico: '⛓️', name: 'Unbroken',     desc: '20-answer combo in Speed' },
+  { id: 'bigday',      ico: '🏃', name: 'Marathon',     desc: 'Answer 50 verbs in one day' },
+  { id: 'evoMax',      ico: '🐉', name: 'Final form',   desc: 'Evolve your mascot to the max' },
+  { id: 'fixer',       ico: '🔧', name: 'Mistake mender', desc: 'Clear a Trouble session with no misses' },
+  { id: 'collector',   ico: '🎨', name: 'Collector',    desc: 'Unlock every theme & mascot' },
   // ---- hidden ----
   { id: 'nightOwl',    ico: '🦉', name: 'Night Owl',    desc: 'Practice late at night', hidden: true },
   { id: 'earlyBird',   ico: '🐤', name: 'Early Bird',   desc: 'Practice early in the morning', hidden: true },
   { id: 'comeback',    ico: '💖', name: 'Comeback Kid', desc: 'Return after a week away', hidden: true },
   { id: 'flawlessSpd', ico: '🛡️', name: 'Untouchable',  desc: 'Speed round 15+ with zero misses', hidden: true },
   { id: 'polyglot',    ico: '🗺️', name: 'Polyglot',     desc: '50 correct in Match', hidden: true },
+  { id: 'perfectType', ico: '✍️', name: 'Spotless',     desc: 'A perfect Type it session', hidden: true },
+  { id: 'reviewZero',  ico: '📭', name: 'Inbox zero',   desc: 'Clear every verb due for review', hidden: true },
+  { id: 'owlAndBird',  ico: '🌗', name: 'Round the clock', desc: 'Practice both late night and early morning', hidden: true },
 ];
 
 /* ---------- State ---------- */
@@ -725,6 +743,9 @@ function endSession() {
   const acc = session.total ? Math.round(session.correct / session.total * 100) : 0;
   const perfect = session.correct === session.total && session.total > 0;
   if (perfect) { addXp(20); unlockAchievement('perfect'); }
+  if (perfect && session.mode === 'trouble') unlockAchievement('fixer');
+  if (perfect && session.mode === 'type') unlockAchievement('perfectType');
+  if (session.mode === 'review' && dueCount() === 0) unlockAchievement('reviewZero');
   const { unlocks, evolved } = collectRewards();
   saveStore();
 
@@ -783,24 +804,40 @@ function checkAchievements() {
   if (st.totalCorrect >= 10) unlockAchievement('correct10');
   if (st.totalCorrect >= 50) unlockAchievement('correct50');
   if (st.totalCorrect >= 100) unlockAchievement('correct100');
+  if (st.totalCorrect >= 250) unlockAchievement('correct250');
+  if (st.totalCorrect >= 500) unlockAchievement('correct500');
   if (st.dayStreak >= 3) unlockAchievement('streak3');
   if (st.dayStreak >= 7) unlockAchievement('streak7');
   if (st.dayStreak >= 14) unlockAchievement('streak14');
+  if (st.dayStreak >= 30) unlockAchievement('streak30');
   const mc = masteredCount();
   if (mc >= 10) unlockAchievement('mastered10');
   if (mc >= 25) unlockAchievement('mastered25');
-  if (championCount() >= 1) unlockAchievement('champion1');
+  if (mc >= 50) unlockAchievement('mastered50');
+  if (mc >= VERBS.length && VERBS.length > 0) unlockAchievement('masteredAll');
+  const cc = championCount();
+  if (cc >= 1) unlockAchievement('champion1');
+  if (cc >= 10) unlockAchievement('champion10');
   if ((st.typeCorrect || 0) >= 50) unlockAchievement('type50');
+  if ((st.typeCorrect || 0) >= 100) unlockAchievement('type100');
   if ((st.matchCorrect || 0) >= 25) unlockAchievement('match25');
   if ((st.matchCorrect || 0) >= 50) unlockAchievement('polyglot');
+  if ((st.matchCorrect || 0) >= 100) unlockAchievement('match100');
   if ((st.speedBest || 0) >= 15) unlockAchievement('speed15');
   if ((st.speedBest || 0) >= 25) unlockAchievement('speed25');
+  if ((st.speedBest || 0) >= 35) unlockAchievement('speed35');
   if ((st.maxCombo || 0) >= 10) unlockAchievement('combo10');
+  if ((st.maxCombo || 0) >= 20) unlockAchievement('combo20');
   if ((st.speedBestClean || 0) >= 15) unlockAchievement('flawlessSpd');
   if (Object.keys(st.modesPlayed || {}).length >= 4) unlockAchievement('allModes');
   if (levelFromXp(st.xp) >= 7) unlockAchievement('level10');
+  if (levelFromXp(st.xp) >= 10) unlockAchievement('levelTen');
+  if ((st.history[todayKey()] || 0) >= 50) unlockAchievement('bigday');
+  if (currentEvoStage() >= EVO_NAMES.length - 1) unlockAchievement('evoMax');
+  if (cosmeticList().every(isUnlocked)) unlockAchievement('collector');
   if (hour >= 22 || hour < 5) unlockAchievement('nightOwl');
   if (hour >= 5 && hour < 8) unlockAchievement('earlyBird');
+  if (store.achievements.nightOwl && store.achievements.earlyBird) unlockAchievement('owlAndBird');
   if (store.flags && store.flags.comebackPending) unlockAchievement('comeback');
 }
 
