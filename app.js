@@ -1,24 +1,34 @@
 /* ============================================================
    Tense Titans — irregular verbs trainer (Phase 2)
-   Vanilla JS, no build step, offline PWA.
+   Vanilla JS, no build step, offline PWA. Loaded as an ES module.
    ============================================================ */
 'use strict';
 
-const APP_VERSION = '1.8.10';
-const SCHEMA_VERSION = 6;        // bump + add a migration when store shape changes
+// Pure, DOM-free, unit-tested cores (see src/core/* and test/*).
+import {
+  EVO_LEVELS, RANKS,
+  xpForLevel, levelFromXp, xpIntoLevel, xpForNextLevel,
+  evoStageForLevel, rankTitle,
+} from './src/core/leveling.js';
+import { ED_ALSO_VALID, lettersOnly, isCorrect, regularize, trapFor } from './src/core/matching.js';
+import {
+  DAY, FORM_MAX, SCHEDULE_GATE, STAGE_MIN,
+  newForm, minLvl, decayForm, applyAnswer,
+} from './src/core/srs.js';
+import { SCHEMA_VERSION, defaultStore, migrate, looksLikeStore } from './src/core/store-migrate.js';
+import {
+  troubleList, troubleCount, dueForms, buildReviewQueue, pickVerb, chooseForm,
+} from './src/core/selection.js';
+import { earnedAchievements } from './src/core/achievements.js';
+import { reqMet, reqText } from './src/core/cosmetics.js';
+
+const APP_VERSION = '1.8.17';
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
 
 /* ---- Spaced-repetition progression (per form: past & participle) ---- */
-const DAY = 86400000;
-const FORM_MAX = 10;             // top per-form level
-const PICK_FORM_CAP = 3;         // "Pick" (recognition) can raise a form only to level 3
-const SCHEDULE_GATE = 3;         // at level >= this, a form advances only when it's "due"
-// Days to wait after REACHING a level before the form is due to advance again (index = level).
-// Fibonacci-flavoured, tuned so: Growing(5)≈3–5d, Mastered(7)≈7–10d, Champion(10)≈3 weeks.
-const INTERVAL_DAYS = [0, 0, 0, 1, 2, 3, 3, 4, 5, 6, 0];
-// Stage thresholds by the WEAKER of the two forms (min level) — you must know BOTH.
-const STAGE_MIN = { sprout: 3, growing: 5, mastered: 7, gold: 10 };
+// All SRS tunables/helpers (DAY, FORM_MAX, PICK_FORM_CAP, SCHEDULE_GATE, INTERVAL_DAYS, STAGE_MIN,
+// scheduling, applyAnswer) and selection live in src/core/srs.js + src/core/selection.js.
 const STAGES = [
   { key: 'new',      emoji: '⚪', name: 'New',      hint: 'Not started yet' },
   { key: 'seedling', emoji: '🌱', name: 'Seedling', hint: 'Just started — keep answering' },
@@ -28,7 +38,7 @@ const STAGES = [
   { key: 'gold',     emoji: '🌟', name: 'Champion', hint: 'Both lvl 10 — kept perfect for weeks' },
 ];
 // 6 illustrated evolution stages (images 1..6). Evolve every 2 levels -> stages 1..5.
-const EVO_LEVELS = [3, 5, 7, 9, 11];   // ~300 / 1500 / 6300 / 25500 / 102300 XP — a real climb
+// EVO_LEVELS now lives in src/core/leveling.js (imported above).
 const EVO_NAMES = ['Hatchling', 'Youngling', 'Adept', 'Warrior', 'Elder', 'Champion'];
 
 /* ---------- Catalog of cosmetics (safe to extend freely) ---------- */
@@ -123,99 +133,24 @@ let evoAnimPending = false;   // play the evolution pop on the next home render
 
 /* ============================================================
    Store: load / migrate / save  (backward compatible)
+   defaultStore / fillDefaults / migrate now live in src/core/store-migrate.js
+   (imported above); only the localStorage I/O stays here.
    ============================================================ */
-function defaultStore() {
-  return {
-    schemaVersion: SCHEMA_VERSION,
-    progress: {},          // verbId -> { past:{lvl,due,peak,correct,wrong}, pp:{...}, lastSeen }
-    stats: {
-      xp: 0, dayStreak: 0, bestStreak: 0, lastStudyDate: null,
-      totalAnswers: 0, totalCorrect: 0, history: {},
-      typeCorrect: 0, matchCorrect: 0, speedBest: 0, speedBestClean: 0, maxCombo: 0,
-      modesPlayed: {},
-    },
-    achievements: {},      // id -> ISO date unlocked
-    settings: {
-      name: '', mascot: 'dragon', theme: 'default', dark: false,
-      sound: true, haptics: true, voiceURI: '', rate: 1, pitch: 1, dailyGoal: 10, reduceEffects: false,
-    },
-    flags: { onboarded: false, evoStage: 0, unlocked: {} },
-  };
-}
-
-// Deep-ish merge that NEVER drops existing user fields, only fills gaps.
-function fillDefaults(target, defaults) {
-  for (const k in defaults) {
-    if (defaults[k] && typeof defaults[k] === 'object' && !Array.isArray(defaults[k])) {
-      if (typeof target[k] !== 'object' || target[k] === null) target[k] = {};
-      fillDefaults(target[k], defaults[k]);
-    } else if (!(k in target)) {
-      target[k] = defaults[k];
-    }
-  }
-  return target;
-}
-
-function migrate(s) {
-  // Run sequential migrations; add new `if (s.schemaVersion < N)` blocks over time.
-  // v1 -> v2: introduced `flags` (onboarding + mascot evolution). Existing players
-  // already have progress, so mark them onboarded so we don't replay the intro.
-  if ((s.schemaVersion || 1) < 2) {
-    s.flags = s.flags || {};
-    const hasProgress = s.progress && Object.keys(s.progress).length > 0;
-    if (s.flags.onboarded === undefined) s.flags.onboarded = hasProgress;
-  }
-  // v2 -> v3: single Leitner `box` (0–5) becomes per-form levels (past + participle, 0–10)
-  // with spaced-repetition scheduling. Map old box to a roughly equivalent level on both forms.
-  if ((s.schemaVersion || 1) < 3 && s.progress) {
-    const boxToLvl = { 0: 0, 1: 2, 2: 3, 3: 4, 4: 5, 5: 7 };
-    const now = Date.now();
-    for (const id in s.progress) {
-      const old = s.progress[id];
-      if (old && old.box !== undefined && !old.past) {
-        const lvl = boxToLvl[Math.min(old.box, 5)] ?? 0;
-        s.progress[id] = {
-          past: { lvl, due: now, peak: lvl, correct: old.correct || 0, wrong: old.wrong || 0 },
-          pp:   { lvl, due: now, peak: lvl, correct: 0, wrong: 0 },
-          lastSeen: old.lastSeen || 0,
-        };
-      }
-    }
-  }
-  // v4 -> v5: cosmetics now unlock by meaningful milestones (mastery/streak/level),
-  // not raw XP. Honestly re-lock everything, but keep whatever the player is currently
-  // wearing so nothing they chose disappears. markUnlocks() later re-grants any already met.
-  if ((s.schemaVersion || 1) < 5) {
-    s.flags = s.flags || {};
-    s.flags.unlocked = {};
-    const sel = s.settings || {};
-    if (sel.mascot) s.flags.unlocked[sel.mascot] = true;
-    if (sel.theme) s.flags.unlocked[sel.theme] = true;
-    delete s._announced;   // old XP-announcement bookkeeping no longer used
-  }
-  // v5 -> v6: evolution now happens every 2 levels (steeper). Roll the saved evolution
-  // high-water mark back to whatever the player's CURRENT XP/level earns under the new
-  // thresholds, so over-evolved players climb (and re-celebrate) the stages again.
-  if ((s.schemaVersion || 1) < 6) {
-    s.flags = s.flags || {};
-    s.flags.evoStage = evoStageForLevel(levelFromXp((s.stats && s.stats.xp) || 0));
-  }
-  // Always fill any newly-added default fields without dropping the player's data.
-  s = fillDefaults(s, defaultStore());
-  s.schemaVersion = SCHEMA_VERSION;
-  return s;
-}
-
 function loadStore() {
-  let s;
+  let raw = null, s;
   try {
-    const raw = localStorage.getItem(STORE_KEY);
+    raw = localStorage.getItem(STORE_KEY);
     s = raw ? JSON.parse(raw) : defaultStore();
   } catch (e) {
     console.warn('Store corrupt, starting fresh but keeping a backup.', e);
     try { localStorage.setItem(STORE_KEY + '.broken', localStorage.getItem(STORE_KEY) || ''); } catch (_) {}
     s = defaultStore();
   }
+  // Safeguard: before a schema-changing migration overwrites the saved store, snapshot the raw
+  // original so a buggy future migration can never make a player's progress unrecoverable.
+  try {
+    if (raw && (s.schemaVersion || 1) < SCHEMA_VERSION) localStorage.setItem(STORE_KEY + '.bak', raw);
+  } catch (_) {}
   store = migrate(s);
   saveStore();
 }
@@ -235,24 +170,14 @@ function saveStore() {
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const todayKey = () => new Date().toISOString().slice(0, 10);
-// Levels cost progressively more: level L costs 100·2^(L-1) XP, so the cumulative
-// XP to REACH level L is 100·(2^(L-1) - 1)  ->  L1=0, L2=100, L3=300, L4=700, L5=1500…
-const xpForLevel = (L) => 100 * (Math.pow(2, L - 1) - 1);
-const levelFromXp = (xp) => { let L = 1; while (xpForLevel(L + 1) <= xp) L++; return L; };
-const xpIntoLevel = (xp) => xp - xpForLevel(levelFromXp(xp));            // XP within the current level
-const xpForNextLevel = (xp) => { const L = levelFromXp(xp); return xpForLevel(L + 1) - xpForLevel(L); }; // span of current level
-// Rank titles by level (cosmetic motivator).
-// One rank per evolution stage — rank advances on the same level milestones as the mascot (Lv 1/3/5/7/9/11).
-const RANKS = ['Novice', 'Apprentice', 'Squire', 'Knight', 'Champion', 'Titan'];
-function rankTitle(level) { return RANKS[evoStageForLevel(level)]; }
+// Leveling math (xpForLevel / levelFromXp / xpIntoLevel / xpForNextLevel) and
+// rank titles (RANKS / rankTitle) now live in src/core/leveling.js (imported above).
 
-function newForm() { return { lvl: 0, due: 0, peak: 0, correct: 0, wrong: 0 }; }
 function prog(id) {
   if (!store.progress[id]) store.progress[id] = { past: newForm(), pp: newForm(), lastSeen: 0 };
   return store.progress[id];
 }
 function isSeen(id) { return !!store.progress[id]; }
-function minLvl(p) { return Math.min(p.past.lvl, p.pp.lvl); }
 function masteredCount() {
   return VERBS.filter(v => { const p = store.progress[v.id]; return p && minLvl(p) >= STAGE_MIN.mastered; }).length;
 }
@@ -270,74 +195,23 @@ function stageOf(id) {
   return { idx, m, ...STAGES[idx] };
 }
 
-// ---- Forgetting curve: overdue forms slip levels (recover 2x faster via peak) ----
-function graceDays(lvl) { return Math.max(2, 2 * (INTERVAL_DAYS[lvl] || 0)); }
-function decayForm(f) {
-  let guard = 0;
-  while (f.lvl > 0 && f.due && Date.now() > f.due + graceDays(f.lvl) * DAY && guard++ < 30) {
-    f.due += graceDays(f.lvl) * DAY;   // consume one grace window
-    f.lvl -= 1;                        // ...and slip a level (peak is kept → fast relearn)
-  }
-}
+// Forgetting curve, scheduling gates, and graceDays now live in src/core/srs.js (imported above).
 function decayAll() {
   for (const id in store.progress) {
     const p = store.progress[id];
     if (p && p.past) { decayForm(p.past); decayForm(p.pp); }
   }
 }
-// Is a form ready to advance right now? (low levels are instant; high levels are scheduled)
-function formDue(f) { return f.lvl < SCHEDULE_GATE || Date.now() >= (f.due || 0); }
-// A scheduled form that is past its review date (the "do your reviews" queue).
-function isReviewDue(f) { return f.lvl > 0 && f.lvl >= SCHEDULE_GATE && Date.now() >= (f.due || 0); }
-function dueForms(p) {
-  const out = [];
-  if (isReviewDue(p.past)) out.push('past');
-  if (isReviewDue(p.pp)) out.push('pp');
-  return out;
-}
-// How many seen verbs have at least one form due for review right now.
+// dueForms / buildReviewQueue / troubleScore / troubleList / troubleCount / pickVerb / chooseForm
+// now live in src/core/selection.js (imported above). dueCount stays — it walks the global VERBS/store.
 function dueCount() {
   let n = 0;
   for (const v of VERBS) { const p = store.progress[v.id]; if (p && dueForms(p).length) n++; }
   return n;
 }
-// Flat, shuffled queue of every due form (a verb with both due appears twice).
-function buildReviewQueue() {
-  const q = [];
-  for (const v of VERBS) {
-    const p = store.progress[v.id];
-    if (!p) continue;
-    for (const which of dueForms(p)) q.push({ v, which });
-  }
-  return shuffle(q);
-}
-
-// "Trouble spots": verbs you keep missing (weighted by wrongs, low accuracy, low level).
-function troubleScore(v) {
-  const p = store.progress[v.id];
-  if (!p) return 0;
-  const wrongs = p.past.wrong + p.pp.wrong;
-  if (wrongs === 0) return 0;
-  // A verb is a "trouble spot" only while a missed form still sits below a stable level.
-  // Once correct answers lift it back to the gate, it counts as fixed and leaves the list.
-  if (minLvl(p) >= SCHEDULE_GATE) return 0;
-  const total = wrongs + p.past.correct + p.pp.correct;
-  const acc = total ? (p.past.correct + p.pp.correct) / total : 1;
-  return wrongs * 2 + (1 - acc) * 10 + (SCHEDULE_GATE - minLvl(p)) * 2;
-}
-function troubleList(n = 10) {
-  return VERBS.filter(v => troubleScore(v) > 0)
-    .sort((a, b) => troubleScore(b) - troubleScore(a))
-    .slice(0, n);
-}
-function troubleCount() { return VERBS.filter(v => troubleScore(v) > 0).length; }
 
 // ---- Mascot evolution (Tamagotchi-style, driven by level) ----
-function evoStageForLevel(level) {
-  let stage = 0;
-  for (const lv of EVO_LEVELS) if (level >= lv) stage++;
-  return stage; // 0..3
-}
+// evoStageForLevel() now lives in src/core/leveling.js (imported above).
 function currentEvoStage() { return evoStageForLevel(levelFromXp(store.stats.xp)); }
 function mascotDef() { return MASCOTS.find(m => m.id === store.settings.mascot) || MASCOTS[0]; }
 function mascotFormEmoji(stage) { return mascotDef().forms[stage] || mascotDef().emoji; }
@@ -350,20 +224,7 @@ function xpToNextEvo() {
   if (!next) return null;
   return xpForLevel(next) - store.stats.xp;
 }
-// Compare answers letters-only, so spacing / slashes / punctuation never matter.
-function lettersOnly(s) { return String(s).toLowerCase().replace(/[^a-z]+/g, ''); }
-// Robust check for answers that may have two valid forms ("was/were", "got/gotten").
-// Accepts: either single form, the whole "was/were" token (Pick option), or both
-// forms typed together in any order / separator ("was were", "were, was", ...).
-function isCorrect(given, answer) {
-  const g = lettersOnly(given);
-  if (!g) return false;
-  const variants = answer.split('/').map(lettersOnly).filter(Boolean);
-  if (variants.includes(g)) return true;
-  const joined = variants.join('');
-  const joinedRev = [...variants].reverse().join('');
-  return g === joined || g === joinedRev;
-}
+// lettersOnly / isCorrect now live in src/core/matching.js (imported above).
 
 function toast(msg) {
   const t = $('#toast');
@@ -387,54 +248,15 @@ function show(screen) {
 }
 
 /* ============================================================
-   Spaced-repetition selection (Leitner-flavoured)
-   ============================================================ */
-function pickVerb(excludeId, newBudgetRef) {
-  const pool = [];
-  for (const v of VERBS) {
-    if (v.id === excludeId) continue;
-    const p = store.progress[v.id];
-    let weight;
-    if (!p) {
-      weight = newBudgetRef.left > 0 ? 8 : 0.2;   // gate how many new verbs appear
-    } else {
-      const m = minLvl(p);
-      weight = (FORM_MAX + 1 - m);                // weaker verbs -> higher priority
-      if (formDue(p.past) || formDue(p.pp)) weight *= 2.2;   // due for review -> surface it
-      else weight *= 0.3;                                    // not due -> show rarely
-      if (m >= STAGE_MIN.mastered) weight *= 0.6;            // mastered shows less (unless due)
-    }
-    if (weight > 0) pool.push({ v, weight });
-  }
-  if (!pool.length) return VERBS[Math.floor(Math.random() * VERBS.length)];
-  let total = pool.reduce((a, b) => a + b.weight, 0);
-  let r = Math.random() * total;
-  for (const item of pool) { r -= item.weight; if (r <= 0) {
-    if (!store.progress[item.v.id]) newBudgetRef.left--;
-    return item.v;
-  } }
-  return pool[pool.length - 1].v;
-}
-
-// Test the form that needs work most: prefer a due form, then the lower level.
-function chooseForm(v) {
-  const p = store.progress[v.id];
-  if (!p) return Math.random() < 0.5 ? 'past' : 'pp';
-  const need = (f) => (formDue(f) ? 100 : 0) + (FORM_MAX - f.lvl);
-  const np = need(p.past), npp = need(p.pp);
-  if (np === npp) return Math.random() < 0.5 ? 'past' : 'pp';
-  return np > npp ? 'past' : 'pp';
-}
-
-/* ============================================================
    Session / gameplay
+   (pickVerb / chooseForm / buildReviewQueue live in src/core/selection.js)
    ============================================================ */
 function startSession(mode, customQueue) {
   // Only the four game modes count toward the "played all modes" achievement.
   if (['pick', 'type', 'match', 'speed'].includes(mode)) store.stats.modesPlayed[mode] = true;
   let queue = customQueue || null, total = store.settings.dailyGoal || 10;
   if (mode === 'review') {
-    queue = buildReviewQueue();
+    queue = shuffle(buildReviewQueue(VERBS, store));
     if (!queue.length) { show('home'); return; }   // nothing due — safety
   }
   if (queue) total = Math.min(queue.length, 30);
@@ -476,13 +298,13 @@ function nextQuestion() {
     const item = session.queue[session.index];
     v = item.v; which = item.which || null;
   } else {
-    v = pickVerb(session.lastId, session.newBudget);
+    v = pickVerb(VERBS, store, session.lastId, session.newBudget);
     session.lastId = v.id;
   }
   if (session.mode === 'match') {
     session.q = { kind: 'translate', v, answer: v.ru.join(', ') };
   } else {
-    which = which || chooseForm(v);   // test the form that needs it most
+    which = which || chooseForm(v, store);   // test the form that needs it most
     session.q = { kind: 'form', v, which, answer: v[which] };
   }
   renderQuestion();
@@ -525,30 +347,14 @@ function renderQuestion() {
   else buildOptions(area);              // pick, speed, trouble -> multiple choice
 }
 
-// A naive over-regularized form (cut -> cuted) — a realistic learner mistake. Kept naive (no
-// consonant doubling) on purpose, so it can't accidentally match a real form like "quitted"/"wedded".
-function regularize(base) {
-  if (/[^aeiou]y$/i.test(base)) return base.slice(0, -1) + 'ied';
-  if (/e$/i.test(base)) return base + 'd';
-  return base + 'ed';
-}
-// The clean -t/-ed pairs (burn, learn, spell…) now carry BOTH forms in verbs.json ("burnt/burned"),
-// so isCorrect accepts either and the -ed distractor is auto-rejected. This set is only the verbs
-// whose -ed form is valid but rarer/sense-specific (kept single-form), so we skip the -ed trap there.
-const ED_ALSO_VALID = new Set(['kneel', 'light', 'speed', 'shine', 'broadcast']);
+// regularize / ED_ALSO_VALID and the confusable trap (trapFor) now live in src/core/matching.js.
 
 function buildOptions(area) {
   const { v, which, answer } = session.q;
   const opts = new Set([answer]);
-  // Sneaky trap: the verb's OTHER form (past<->participle), e.g. "gone" when asked for "went".
-  const otherForm = which === 'past' ? v.pp : v.past;
-  if (otherForm && !isCorrect(otherForm, answer)) {
-    opts.add(otherForm);
-  } else if (!ED_ALSO_VALID.has(v.id)) {
-    // past == participle (or never-changing): trap with the wrong "-ed" form (bringed, cuted...)
-    const reg = regularize(v.base);
-    if (reg && !isCorrect(reg, answer)) opts.add(reg);
-  }
+  // Sneaky trap: the verb's OTHER form (past<->participle), or a wrong "-ed" form. See trapFor.
+  const trap = trapFor(v, which, ED_ALSO_VALID);
+  if (trap) opts.add(trap);
   // Fill the rest with same-type forms from other verbs.
   const others = VERBS.filter(x => x.id !== v.id).map(x => x[which]);
   while (opts.size < 4 && others.length) opts.add(others[Math.floor(Math.random() * others.length)]);
@@ -609,38 +415,16 @@ function handleAnswer(given, el) {
 
   let hint = '';
   if (q.kind === 'form' && ['pick', 'type', 'review', 'trouble'].includes(session.mode)) {
-    // --- spaced-repetition leveling (learning + review + trouble modes) ---
-    const recall = session.mode === 'type' || session.mode === 'review';   // typed = recall
-    const p = prog(q.v.id), f = p[q.which];
+    // Spaced-repetition leveling — the pure transition lives in src/core/srs.js (applyAnswer).
+    const p = prog(q.v.id);
     p.lastSeen = Date.now();
+    const otherLvl = (q.which === 'past' ? p.pp : p.past).lvl;
+    const res = applyAnswer(p[q.which], { ok, mode: session.mode, otherLvl });
+    p[q.which] = res.form;
+    hint = res.hint;
     if (ok) {
-      f.correct++;
-      if (recall) store.stats.typeCorrect++;
-      addXp(recall || session.mode === 'trouble' ? 15 : 10);   // fixing mistakes pays a bonus
-      if (session.mode === 'trouble') {
-        // Focused drill: a correct recall lifts the weak form back to the stable gate,
-        // so a fixed verb actually drops off the trouble list.
-        if (f.lvl < SCHEDULE_GATE) { f.lvl = SCHEDULE_GATE; f.peak = Math.max(f.peak, f.lvl); }
-        f.due = Date.now() + (INTERVAL_DAYS[f.lvl] || 0) * DAY;
-        hint = minLvl(p) >= SCHEDULE_GATE ? '✅ Fixed!' : 'Good — its other form still needs a fix';
-      } else {
-        const modeCap = recall ? FORM_MAX : PICK_FORM_CAP;
-        if (f.lvl >= modeCap) {
-          hint = !recall ? 'Switch to ⌨️ Type it to level up!' : '';
-        } else if (f.lvl >= SCHEDULE_GATE && Date.now() < (f.due || 0)) {
-          hint = 'Counts! Comes back for review later ⏳';
-        } else {
-          f.lvl++;
-          f.peak = Math.max(f.peak, f.lvl);
-          let wait = INTERVAL_DAYS[f.lvl] || 0;
-          if (f.lvl < f.peak) wait = Math.ceil(wait / 2);
-          f.due = Date.now() + wait * DAY;
-          if (minLvl(p) === STAGE_MIN.mastered) hint = '🌳 Mastered!';
-          else if (minLvl(p) === STAGE_MIN.gold) hint = '🌟 Champion verb!';
-        }
-      }
-    } else {
-      f.wrong++; f.lvl = Math.max(0, f.lvl - 2); f.due = Date.now();
+      if (res.recall) store.stats.typeCorrect++;
+      addXp(res.xp);
     }
   } else if (q.kind === 'translate') {
     if (ok) { store.stats.matchCorrect++; addXp(8); }
@@ -784,7 +568,7 @@ function endSession() {
   setResultLabels('correct', 'accuracy', 'XP');
   renderResultUnlocks(evolved, unlocks);
   if (session.mode === 'trouble') {
-    const left = troubleCount();
+    const left = troubleCount(VERBS, store);
     const d = document.createElement('div'); d.className = 'unlock-pill';
     d.textContent = left === 0 ? '🎉 All trouble spots cleared!' : `🛠️ ${left} verb${left > 1 ? 's' : ''} still to fix`;
     $('#results-unlocks').appendChild(d);
@@ -827,47 +611,24 @@ function unlockAchievement(id) {
   if (a) showAchievementPop(a);
   return true;
 }
+// Build a snapshot for the pure evaluator (src/core/achievements.js), then unlock any new ids.
 function checkAchievements() {
-  const st = store.stats, hour = new Date().getHours();
-  if (st.totalAnswers >= 1) unlockAchievement('first');
-  if (st.totalCorrect >= 10) unlockAchievement('correct10');
-  if (st.totalCorrect >= 50) unlockAchievement('correct50');
-  if (st.totalCorrect >= 100) unlockAchievement('correct100');
-  if (st.totalCorrect >= 250) unlockAchievement('correct250');
-  if (st.totalCorrect >= 500) unlockAchievement('correct500');
-  if (st.dayStreak >= 3) unlockAchievement('streak3');
-  if (st.dayStreak >= 7) unlockAchievement('streak7');
-  if (st.dayStreak >= 14) unlockAchievement('streak14');
-  if (st.dayStreak >= 30) unlockAchievement('streak30');
-  const mc = masteredCount();
-  if (mc >= 10) unlockAchievement('mastered10');
-  if (mc >= 25) unlockAchievement('mastered25');
-  if (mc >= 50) unlockAchievement('mastered50');
-  if (mc >= VERBS.length && VERBS.length > 0) unlockAchievement('masteredAll');
-  const cc = championCount();
-  if (cc >= 1) unlockAchievement('champion1');
-  if (cc >= 10) unlockAchievement('champion10');
-  if ((st.typeCorrect || 0) >= 50) unlockAchievement('type50');
-  if ((st.typeCorrect || 0) >= 100) unlockAchievement('type100');
-  if ((st.matchCorrect || 0) >= 25) unlockAchievement('match25');
-  if ((st.matchCorrect || 0) >= 50) unlockAchievement('polyglot');
-  if ((st.matchCorrect || 0) >= 100) unlockAchievement('match100');
-  if ((st.speedBest || 0) >= 15) unlockAchievement('speed15');
-  if ((st.speedBest || 0) >= 25) unlockAchievement('speed25');
-  if ((st.speedBest || 0) >= 35) unlockAchievement('speed35');
-  if ((st.maxCombo || 0) >= 10) unlockAchievement('combo10');
-  if ((st.maxCombo || 0) >= 20) unlockAchievement('combo20');
-  if ((st.speedBestClean || 0) >= 15) unlockAchievement('flawlessSpd');
-  if (Object.keys(st.modesPlayed || {}).length >= 4) unlockAchievement('allModes');
-  if (levelFromXp(st.xp) >= 7) unlockAchievement('level10');
-  if (levelFromXp(st.xp) >= 10) unlockAchievement('levelTen');
-  if ((st.history[todayKey()] || 0) >= 50) unlockAchievement('bigday');
-  if (currentEvoStage() >= EVO_NAMES.length - 1) unlockAchievement('evoMax');
-  if (cosmeticList().every(isUnlocked)) unlockAchievement('collector');
-  if (hour >= 22 || hour < 5) unlockAchievement('nightOwl');
-  if (hour >= 5 && hour < 8) unlockAchievement('earlyBird');
-  if (store.achievements.nightOwl && store.achievements.earlyBird) unlockAchievement('owlAndBird');
-  if (store.flags && store.flags.comebackPending) unlockAchievement('comeback');
+  const st = store.stats;
+  const ids = earnedAchievements({
+    stats: st,
+    mastered: masteredCount(),
+    champions: championCount(),
+    totalVerbs: VERBS.length,
+    level: levelFromXp(st.xp),
+    evoStage: currentEvoStage(),
+    evoMaxStage: EVO_NAMES.length - 1,
+    hour: new Date().getHours(),
+    todayCount: st.history[todayKey()] || 0,
+    allCosmeticsUnlocked: cosmeticList().every(isUnlocked),
+    has: (id) => !!store.achievements[id],
+    comebackPending: !!(store.flags && store.flags.comebackPending),
+  });
+  for (const id of ids) unlockAchievement(id);
 }
 
 // Animated unlock banner (queued so multiple unlocks don't overlap).
@@ -887,37 +648,20 @@ function drainAchQueue() {
 /* ============================================================
    Cosmetic unlocks (meaningful milestones, sticky once earned)
    ============================================================ */
-function reqMet(req) {
-  if (!req) return true;
-  const st = store.stats;
-  switch (req.type) {
-    case 'level':    return levelFromXp(st.xp) >= req.n;
-    case 'mastered': return masteredCount() >= req.n;
-    case 'streak':   return st.bestStreak >= req.n;   // best ever, so it never re-locks
-    case 'champion': return championCount() >= req.n;
-    default:         return true;
-  }
-}
-function reqText(req) {
-  if (!req) return '';
-  switch (req.type) {
-    case 'level':    return 'Reach level ' + req.n;
-    case 'mastered': return 'Master ' + req.n + ' verbs 🌳';
-    case 'streak':   return req.n + '-day streak 🔥';
-    case 'champion': return req.n + ' Champion verb 🌟';
-    default:         return '';
-  }
+// Snapshot of progress for the pure reqMet (src/core/cosmetics.js). reqMet/reqText are imported.
+function reqCtx() {
+  return { level: levelFromXp(store.stats.xp), mastered: masteredCount(), bestStreak: store.stats.bestStreak, champions: championCount() };
 }
 function unlockedMap() { if (!store.flags.unlocked) store.flags.unlocked = {}; return store.flags.unlocked; }
-function isUnlocked(c) { return !c.req || !!unlockedMap()[c.id] || reqMet(c.req); }
+function isUnlocked(c) { return !c.req || !!unlockedMap()[c.id] || reqMet(c.req, reqCtx()); }
 function cosmeticList() {
   return [...THEMES.map(t => ({ ...t, kind: 'Theme' })), ...MASCOTS.map(m => ({ ...m, kind: 'Mascot' }))];
 }
 // Flag any newly-earned cosmetics (sticky) and return them for announcement.
 function markUnlocks() {
-  const u = unlockedMap(), newly = [];
+  const u = unlockedMap(), newly = [], ctx = reqCtx();
   for (const c of cosmeticList()) {
-    if (c.req && !u[c.id] && reqMet(c.req)) { u[c.id] = true; newly.push(c); }
+    if (c.req && !u[c.id] && reqMet(c.req, ctx)) { u[c.id] = true; newly.push(c); }
   }
   if (newly.length) saveStore();
   return newly;
@@ -1071,7 +815,7 @@ function renderHome() {
   banner.classList.toggle('hidden', due === 0);
   if (due > 0) $('#review-count').textContent = due;
   // Trouble-spots banner at the bottom: the verbs being missed most
-  const tc = troubleCount();
+  const tc = troubleCount(VERBS, store);
   $('#trouble-banner').classList.toggle('hidden', tc === 0);
   if (tc > 0) $('#trouble-count').textContent = tc;
 }
@@ -1140,7 +884,7 @@ function renderStats() {
   ).join('');
 
   // Trouble spots: the verbs you keep missing.
-  const trouble = troubleList();
+  const trouble = troubleList(VERBS, store);
   $('#trouble-section').classList.toggle('hidden', trouble.length === 0);
   if (trouble.length) {
     $('#trouble-list').innerHTML = trouble.map(v => `<span class="trouble-chip">${v.base}</span>`).join('');
@@ -1465,7 +1209,7 @@ function wire() {
   $('#onb-back').onclick = onbBack;
   $('#onb-skip').onclick = finishOnboarding;
   $('#how-btn').onclick = () => openModal('How to play', howToPlayHTML());
-  const startTrouble = () => { const q = troubleList().map(v => ({ v })); if (q.length) startSession('trouble', q); };
+  const startTrouble = () => { const q = troubleList(VERBS, store).map(v => ({ v })); if (q.length) startSession('trouble', q); };
   $('#trouble-practice').onclick = startTrouble;
   $('#trouble-banner').onclick = startTrouble;
   $('#modal-close').onclick = closeModal;
@@ -1493,7 +1237,13 @@ function importData(e) {
   reader.onload = () => {
     try {
       const data = JSON.parse(reader.result);
-      if (!data || typeof data !== 'object') throw new Error('bad file');
+      if (!looksLikeStore(data)) throw new Error('not a Tense Titans backup');
+      // Non-destructive: confirm before replacing real progress, and back up the current store first.
+      const hasProgress = store && store.progress && Object.keys(store.progress).length > 0;
+      if (hasProgress && !confirm('Importing will replace your current progress. Continue?')) {
+        e.target.value = ''; return;
+      }
+      try { localStorage.setItem(STORE_KEY + '.bak', JSON.stringify(store)); } catch (_) {}
       store = migrate(data);
       saveStore(); applyCosmetics(); renderSettings();
       toast('Progress imported ✔');
