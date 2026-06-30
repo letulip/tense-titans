@@ -1,0 +1,47 @@
+/* ===== Overlays (onboarding + modal) ===== */
+.overlay { position: fixed; inset: 0; background: rgba(6,8,20,.78); backdrop-filter: blur(4px); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 18px; animation: fade .2s ease; }
+.onb-card, .modal-card { width: 100%; max-width: 460px; background: linear-gradient(165deg, var(--bg-top), var(--bg-bot)); border: 1px solid var(--border); border-radius: 22px; box-shadow: var(--shadow); padding: 24px 20px; position: relative; max-height: 90vh; overflow-y: auto; }
+.onb-skip { position: absolute; top: 14px; right: 16px; z-index: 2; background: none; border: none; color: var(--muted); font-size: 14px; cursor: pointer; padding: 4px 6px; }
+.onb-body { text-align: center; min-height: 240px; margin-top: 18px; }
+.onb-body h2 { margin: 10px 0 6px; }
+.onb-body p { color: var(--muted); margin: 0 0 16px; }
+.onb-mascot { font-size: 66px; animation: bob 3s ease-in-out infinite; }
+.onb-logo { width: 104px; height: 104px; border-radius: 24px; display: block; margin: 0 auto 6px; box-shadow: var(--shadow); animation: bob 3s ease-in-out infinite; }
+.onb-input { width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 12px; padding: 13px; font-size: 17px; text-align: center; }
+.onb-mascots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.onb-mascot-opt { background: var(--surface); border: 2px solid var(--border); border-radius: 14px; padding: 12px 6px; cursor: pointer; color: var(--text); display: flex; flex-direction: column; gap: 4px; align-items: center; }
+.onb-mascot-opt.active { border-color: var(--accent-2); background: var(--surface-2); }
+.onb-mascot-opt.locked { opacity: .55; cursor: not-allowed; }
+.om-emoji { font-size: 34px; }
+.om-name { font-size: 12px; color: var(--muted); }
+/* Language picker — onboarding (grid) + settings (wrap row) */
+.onb-langs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.onb-lang-opt { background: var(--surface); border: 2px solid var(--border); border-radius: 14px; padding: 12px 6px; cursor: pointer; color: var(--text); display: flex; flex-direction: column; gap: 4px; align-items: center; }
+.onb-lang-opt.active { border-color: var(--accent-2); background: var(--surface-2); }
+.ol-flag { font-size: 30px; }
+.ol-name { font-size: 12px; color: var(--muted); }
+.lang-picker { display: flex; gap: 8px; flex-wrap: wrap; }
+.lang-opt { background: var(--surface); border: 2px solid var(--border); border-radius: 12px; padding: 6px 10px; cursor: pointer; color: var(--text); display: flex; align-items: center; gap: 6px; }
+.lang-opt.active { border-color: var(--accent-2); background: var(--surface-2); }
+.lo-flag { font-size: 20px; }
+.lo-name { font-size: 13px; }
+.onb-presets { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 12px; }
+.onb-dots { display: flex; gap: 6px; justify-content: center; margin: 16px 0; }
+.onb-dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,.2); }
+.onb-dot.on { background: var(--accent-2); width: 20px; border-radius: 99px; }
+.onb-nav { display: flex; gap: 10px; }
+.onb-nav .ghost-btn { flex: 0 0 90px; }
+.onb-nav .big-btn { flex: 1; width: auto; }
+
+.modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.modal-head h3 { margin: 0; }
+.how-row { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px; text-align: left; }
+.how-ico { font-size: 26px; flex: 0 0 32px; text-align: center; }
+.how-row small, .how-stage small { color: var(--muted); }
+.xp-badge { background: var(--star); color: #2a2200; font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 99px; vertical-align: middle; }
+.how hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+.how-stages { display: flex; flex-direction: column; gap: 8px; }
+.how-stage { display: flex; gap: 8px; align-items: baseline; font-size: 14px; }
+.how-stage small { margin-left: auto; text-align: right; font-size: 12px; }
+.how-foot { color: var(--muted); font-size: 13px; margin-top: 14px; }
+.unlock-pill.evo { background: rgba(108,92,231,.18); border-color: var(--accent-2); color: var(--accent-2); }

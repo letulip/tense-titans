@@ -1,0 +1,10 @@
+/* Source of truth for styles — built into dist/style.min.css by esbuild.
+   Chunks are @imported in original order so the cascade is unchanged. */
+@import "./01-base.css";
+@import "./02-home.css";
+@import "./03-play.css";
+@import "./04-results-stats.css";
+@import "./05-settings.css";
+@import "./06-widgets.css";
+@import "./07-overlays.css";
+@import "./08-extras.css";

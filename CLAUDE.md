@@ -4,7 +4,13 @@ Offline-first PWA that teaches kids English **irregular verbs** through play.
 Built for a ~12-year-old learner: short, game-like, rewarding — not a second textbook.
 
 ## Stack & shape
-- **Pure HTML / CSS / JS. No build step, no bundler, no framework.**
+- **Plain HTML / CSS / JS — no framework.** Source is hand-written ES modules + CSS chunks.
+- **Release build (esbuild, dev-dependency only):** `npm run build` bundles+minifies the JS
+  module graph (`app.js` + `src/core/*` → `dist/app.min.js`) and the CSS chunks
+  (`src/css/*` via `src/css/main.css` → `dist/style.min.css`). `index.html` and `sw.js`
+  reference the `dist/` files; **edit the source, never `dist/`**, then rebuild. The shipped site
+  is still pure static files (no runtime deps); only rebuilding needs `npm install`.
+  `node_modules` is git-ignored; `dist/` is committed so GitHub Pages serves it directly.
 - PWA: `sw.js` (cache-first service worker) + `manifest.json`, fully offline after first load.
 - Progress lives in `localStorage` (`verbquest.store`), versioned with backward-compatible migrations.
 - Hosted on **GitHub Pages** (`git@github.com:letulip/tense-titans.git`). Target devices: Android (Chrome) + Windows laptop.
@@ -22,7 +28,10 @@ Built for a ~12-year-old learner: short, game-like, rewarding — not a second t
 - After the user merges a PR, `main` advances on the remote; fast-forward local `main` with `git fetch` + checkout, but do new work on a fresh branch.
 
 ### Releases
-- Every release **must** bump `CACHE` in `sw.js` **and** `APP_VERSION` in `app.js`. The cache-first SW serves stale files otherwise.
+- **Run `npm run build`** so `dist/` is up to date, and commit `dist/`. The app loads from `dist/`,
+  so unbuilt source changes won't reach the browser (or the preview).
+- Every release **must** bump `CACHE` in `sw.js` **and** `APP_VERSION` in `app.js` (then rebuild so
+  the new version is baked into `dist/app.min.js`). The cache-first SW serves stale files otherwise.
 - Any **new file** that ships to the client must be added to the `ASSETS` precache list in `sw.js`.
 - If the store shape changes, bump `SCHEMA_VERSION` **and** add a migration step in `migrate()`.
 

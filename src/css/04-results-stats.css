@@ -1,0 +1,37 @@
+/* ===== Results ===== */
+#screen-results { display: flex; align-items: center; min-height: 80vh; }
+.results-card { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 24px; padding: 28px 20px; text-align: center; box-shadow: var(--shadow); }
+.results-emoji { font-size: 60px; }
+.results-card h2 { margin: 6px 0 18px; }
+.results-stats { display: flex; justify-content: space-around; margin-bottom: 18px; }
+.results-stats b { font-size: 26px; display: block; }
+.results-stats small { color: var(--muted); font-size: 12px; }
+.results-unlocks { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.unlock-pill { background: rgba(255,209,102,.15); border: 1px solid var(--star); color: var(--star); border-radius: 12px; padding: 10px; font-weight: 700; font-size: 14px; }
+.results-card .big-btn { margin-bottom: 10px; }
+
+/* ===== Stats ===== */
+.stats-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 6px 0 18px; }
+.stats-summary .box { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px; }
+.stats-summary .box b { font-size: 22px; display: block; }
+.stats-summary .box small { color: var(--muted); }
+.section-h { margin: 10px 2px; font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.verb-list { display: flex; flex-direction: column; gap: 8px; }
+.verb-row { display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
+.verb-row .stage { font-size: 22px; }
+.verb-row .forms { flex: 1; }
+.verb-row .forms .b { font-weight: 700; }
+.verb-row .forms .f { color: var(--muted); font-size: 13px; }
+.verb-row .pct { font-size: 13px; color: var(--muted); }
+
+/* ===== Achievements ===== */
+.ach-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
+.ach-cat-head { grid-column: 1 / -1; display: flex; align-items: baseline; justify-content: space-between; margin-top: 10px; padding: 0 2px; }
+.ach-cat-head span { font-weight: 800; font-size: 15px; }
+.ach-cat-head small { color: var(--muted); font-size: 12px; font-weight: 600; }
+.ach-cat-head:first-child { margin-top: 0; }
+.ach { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px; text-align: center; opacity: .5; }
+.ach.unlocked { opacity: 1; border-color: var(--star); background: rgba(255,209,102,.10); }
+.ach .ico { font-size: 34px; }
+.ach .name { font-weight: 700; margin-top: 6px; font-size: 14px; }
+.ach .desc { color: var(--muted); font-size: 12px; margin-top: 2px; }
