@@ -19,8 +19,10 @@ import { SCHEMA_VERSION, defaultStore, migrate, looksLikeStore } from './src/cor
 import {
   troubleList, troubleCount, dueForms, buildReviewQueue, pickVerb, chooseForm,
 } from './src/core/selection.js';
+import { earnedAchievements } from './src/core/achievements.js';
+import { reqMet, reqText } from './src/core/cosmetics.js';
 
-const APP_VERSION = '1.8.15';
+const APP_VERSION = '1.8.16';
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
 
@@ -632,47 +634,24 @@ function unlockAchievement(id) {
   if (a) showAchievementPop(a);
   return true;
 }
+// Build a snapshot for the pure evaluator (src/core/achievements.js), then unlock any new ids.
 function checkAchievements() {
-  const st = store.stats, hour = new Date().getHours();
-  if (st.totalAnswers >= 1) unlockAchievement('first');
-  if (st.totalCorrect >= 10) unlockAchievement('correct10');
-  if (st.totalCorrect >= 50) unlockAchievement('correct50');
-  if (st.totalCorrect >= 100) unlockAchievement('correct100');
-  if (st.totalCorrect >= 250) unlockAchievement('correct250');
-  if (st.totalCorrect >= 500) unlockAchievement('correct500');
-  if (st.dayStreak >= 3) unlockAchievement('streak3');
-  if (st.dayStreak >= 7) unlockAchievement('streak7');
-  if (st.dayStreak >= 14) unlockAchievement('streak14');
-  if (st.dayStreak >= 30) unlockAchievement('streak30');
-  const mc = masteredCount();
-  if (mc >= 10) unlockAchievement('mastered10');
-  if (mc >= 25) unlockAchievement('mastered25');
-  if (mc >= 50) unlockAchievement('mastered50');
-  if (mc >= VERBS.length && VERBS.length > 0) unlockAchievement('masteredAll');
-  const cc = championCount();
-  if (cc >= 1) unlockAchievement('champion1');
-  if (cc >= 10) unlockAchievement('champion10');
-  if ((st.typeCorrect || 0) >= 50) unlockAchievement('type50');
-  if ((st.typeCorrect || 0) >= 100) unlockAchievement('type100');
-  if ((st.matchCorrect || 0) >= 25) unlockAchievement('match25');
-  if ((st.matchCorrect || 0) >= 50) unlockAchievement('polyglot');
-  if ((st.matchCorrect || 0) >= 100) unlockAchievement('match100');
-  if ((st.speedBest || 0) >= 15) unlockAchievement('speed15');
-  if ((st.speedBest || 0) >= 25) unlockAchievement('speed25');
-  if ((st.speedBest || 0) >= 35) unlockAchievement('speed35');
-  if ((st.maxCombo || 0) >= 10) unlockAchievement('combo10');
-  if ((st.maxCombo || 0) >= 20) unlockAchievement('combo20');
-  if ((st.speedBestClean || 0) >= 15) unlockAchievement('flawlessSpd');
-  if (Object.keys(st.modesPlayed || {}).length >= 4) unlockAchievement('allModes');
-  if (levelFromXp(st.xp) >= 7) unlockAchievement('level10');
-  if (levelFromXp(st.xp) >= 10) unlockAchievement('levelTen');
-  if ((st.history[todayKey()] || 0) >= 50) unlockAchievement('bigday');
-  if (currentEvoStage() >= EVO_NAMES.length - 1) unlockAchievement('evoMax');
-  if (cosmeticList().every(isUnlocked)) unlockAchievement('collector');
-  if (hour >= 22 || hour < 5) unlockAchievement('nightOwl');
-  if (hour >= 5 && hour < 8) unlockAchievement('earlyBird');
-  if (store.achievements.nightOwl && store.achievements.earlyBird) unlockAchievement('owlAndBird');
-  if (store.flags && store.flags.comebackPending) unlockAchievement('comeback');
+  const st = store.stats;
+  const ids = earnedAchievements({
+    stats: st,
+    mastered: masteredCount(),
+    champions: championCount(),
+    totalVerbs: VERBS.length,
+    level: levelFromXp(st.xp),
+    evoStage: currentEvoStage(),
+    evoMaxStage: EVO_NAMES.length - 1,
+    hour: new Date().getHours(),
+    todayCount: st.history[todayKey()] || 0,
+    allCosmeticsUnlocked: cosmeticList().every(isUnlocked),
+    has: (id) => !!store.achievements[id],
+    comebackPending: !!(store.flags && store.flags.comebackPending),
+  });
+  for (const id of ids) unlockAchievement(id);
 }
 
 // Animated unlock banner (queued so multiple unlocks don't overlap).
@@ -692,37 +671,20 @@ function drainAchQueue() {
 /* ============================================================
    Cosmetic unlocks (meaningful milestones, sticky once earned)
    ============================================================ */
-function reqMet(req) {
-  if (!req) return true;
-  const st = store.stats;
-  switch (req.type) {
-    case 'level':    return levelFromXp(st.xp) >= req.n;
-    case 'mastered': return masteredCount() >= req.n;
-    case 'streak':   return st.bestStreak >= req.n;   // best ever, so it never re-locks
-    case 'champion': return championCount() >= req.n;
-    default:         return true;
-  }
-}
-function reqText(req) {
-  if (!req) return '';
-  switch (req.type) {
-    case 'level':    return 'Reach level ' + req.n;
-    case 'mastered': return 'Master ' + req.n + ' verbs 🌳';
-    case 'streak':   return req.n + '-day streak 🔥';
-    case 'champion': return req.n + ' Champion verb 🌟';
-    default:         return '';
-  }
+// Snapshot of progress for the pure reqMet (src/core/cosmetics.js). reqMet/reqText are imported.
+function reqCtx() {
+  return { level: levelFromXp(store.stats.xp), mastered: masteredCount(), bestStreak: store.stats.bestStreak, champions: championCount() };
 }
 function unlockedMap() { if (!store.flags.unlocked) store.flags.unlocked = {}; return store.flags.unlocked; }
-function isUnlocked(c) { return !c.req || !!unlockedMap()[c.id] || reqMet(c.req); }
+function isUnlocked(c) { return !c.req || !!unlockedMap()[c.id] || reqMet(c.req, reqCtx()); }
 function cosmeticList() {
   return [...THEMES.map(t => ({ ...t, kind: 'Theme' })), ...MASCOTS.map(m => ({ ...m, kind: 'Mascot' }))];
 }
 // Flag any newly-earned cosmetics (sticky) and return them for announcement.
 function markUnlocks() {
-  const u = unlockedMap(), newly = [];
+  const u = unlockedMap(), newly = [], ctx = reqCtx();
   for (const c of cosmeticList()) {
-    if (c.req && !u[c.id] && reqMet(c.req)) { u[c.id] = true; newly.push(c); }
+    if (c.req && !u[c.id] && reqMet(c.req, ctx)) { u[c.id] = true; newly.push(c); }
   }
   if (newly.length) saveStore();
   return newly;
