@@ -15,12 +15,12 @@ import {
   DAY, FORM_MAX, SCHEDULE_GATE, INTERVAL_DAYS, STAGE_MIN,
   newForm, minLvl, formDue, isReviewDue, graceDays, decayForm,
 } from './src/core/srs.js';
-import { defaultStore, migrate } from './src/core/store-migrate.js';
+import { SCHEMA_VERSION, defaultStore, migrate, looksLikeStore } from './src/core/store-migrate.js';
 import {
   troubleList, troubleCount, dueForms, buildReviewQueue, pickVerb, chooseForm,
 } from './src/core/selection.js';
 
-const APP_VERSION = '1.8.14';
+const APP_VERSION = '1.8.15';
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
 
@@ -136,15 +136,20 @@ let evoAnimPending = false;   // play the evolution pop on the next home render
    (imported above); only the localStorage I/O stays here.
    ============================================================ */
 function loadStore() {
-  let s;
+  let raw = null, s;
   try {
-    const raw = localStorage.getItem(STORE_KEY);
+    raw = localStorage.getItem(STORE_KEY);
     s = raw ? JSON.parse(raw) : defaultStore();
   } catch (e) {
     console.warn('Store corrupt, starting fresh but keeping a backup.', e);
     try { localStorage.setItem(STORE_KEY + '.broken', localStorage.getItem(STORE_KEY) || ''); } catch (_) {}
     s = defaultStore();
   }
+  // Safeguard: before a schema-changing migration overwrites the saved store, snapshot the raw
+  // original so a buggy future migration can never make a player's progress unrecoverable.
+  try {
+    if (raw && (s.schemaVersion || 1) < SCHEMA_VERSION) localStorage.setItem(STORE_KEY + '.bak', raw);
+  } catch (_) {}
   store = migrate(s);
   saveStore();
 }
@@ -1293,7 +1298,13 @@ function importData(e) {
   reader.onload = () => {
     try {
       const data = JSON.parse(reader.result);
-      if (!data || typeof data !== 'object') throw new Error('bad file');
+      if (!looksLikeStore(data)) throw new Error('not a Tense Titans backup');
+      // Non-destructive: confirm before replacing real progress, and back up the current store first.
+      const hasProgress = store && store.progress && Object.keys(store.progress).length > 0;
+      if (hasProgress && !confirm('Importing will replace your current progress. Continue?')) {
+        e.target.value = ''; return;
+      }
+      try { localStorage.setItem(STORE_KEY + '.bak', JSON.stringify(store)); } catch (_) {}
       store = migrate(data);
       saveStore(); applyCosmetics(); renderSettings();
       toast('Progress imported ✔');

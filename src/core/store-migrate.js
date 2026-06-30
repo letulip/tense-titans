@@ -37,6 +37,14 @@ export function fillDefaults(target, defaults) {
   return target;
 }
 
+// Does this parsed object look like a Tense Titans store? Used to reject garbage / foreign files
+// on import before they can overwrite a player's progress. Deliberately lenient about exact fields
+// (old exports differ) but strict about the core shape: progress + stats must be plain objects.
+export function looksLikeStore(data) {
+  const isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
+  return isObj(data) && isObj(data.progress) && isObj(data.stats);
+}
+
 export function migrate(s) {
   // Run sequential migrations; add new `if (s.schemaVersion < N)` blocks over time.
   // v1 -> v2: introduced `flags` (onboarding + mascot evolution). Existing players
