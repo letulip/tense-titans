@@ -1,12 +1,12 @@
 {
   "name": "tense-titans",
-  "version": "1.8.19",
+  "version": "1.8.20",
   "private": true,
   "type": "module",
   "description": "Offline PWA that teaches kids English irregular verbs. Tests run on Node's built-in runner; the release build (CSS chunks + JS modules) is produced by esbuild.",
   "scripts": {
     "test": "node --test",
-    "build:css": "esbuild src/css/main.css --bundle --minify --outfile=dist/style.min.css",
+    "build:css": "esbuild src/css/main.css --bundle --minify --target=safari14,chrome80,firefox80,edge90 --outfile=dist/style.min.css",
     "build:js": "esbuild app.js --bundle --minify --format=esm --outfile=dist/app.min.js",
     "build": "npm run build:css && npm run build:js"
   },
