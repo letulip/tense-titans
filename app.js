@@ -22,7 +22,7 @@ import {
 import { earnedAchievements } from './src/core/achievements.js';
 import { reqMet, reqText } from './src/core/cosmetics.js';
 
-const APP_VERSION = '1.8.18';
+const APP_VERSION = '1.8.20';
 const STORE_KEY = 'verbquest.store';
 const NEW_PER_SESSION = 5;       // how many brand-new verbs to introduce per session
 

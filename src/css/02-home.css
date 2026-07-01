@@ -1,0 +1,56 @@
+/* ===== Home ===== */
+.hero { display: flex; align-items: center; gap: 14px; margin: 10px 2px 18px; }
+@keyframes bob { 0%,100%{ transform: translateY(0);} 50%{ transform: translateY(-6px);} }
+/* compact 3:2 illustrated mascot banner on the left (~1/3 width); tap to enlarge */
+.mascot-banner { width: 33%; max-width: 160px; min-width: 100px; flex-shrink: 0; aspect-ratio: 3 / 2; border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); background: var(--surface); cursor: pointer; }
+.mascot-banner:active { transform: scale(.97); }
+.mascot-banner.emoji-fallback { display: flex; align-items: center; justify-content: center; font-size: 48px; }
+.mascot-img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; }
+.mascot-banner.evolve-in { animation: evoIn .7s cubic-bezier(.2,1.35,.4,1); }
+@keyframes evoIn {
+  0% { transform: scale(.55); opacity: 0; filter: brightness(2); }
+  55% { transform: scale(1.08); opacity: 1; filter: brightness(1.4); }
+  100% { transform: scale(1); opacity: 1; filter: brightness(1); }
+}
+.greeting { flex: 1; min-width: 0; }   /* min-width:0 lets the name ellipsis work in flex */
+.hello { font-size: 24px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sub { color: var(--muted); margin-top: 2px; }
+
+.stat-row { display: flex; gap: 10px; margin-bottom: 14px; }
+.chip {
+  flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 8px 10px; text-align: center; display: flex; flex-wrap: wrap;
+  align-items: baseline; justify-content: center; gap: 2px 6px;
+}
+.chip-ico { font-size: 18px; }
+.chip b { font-size: 20px; }
+.chip small { flex-basis: 100%; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+
+.xpbar-wrap { margin: 4px 2px 16px; }
+.xpbar { height: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 99px; overflow: hidden; }
+.xpbar-fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .5s ease; }
+.xpbar-label { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+.goal-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-bottom: 18px; }
+.goal-top { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 10px; }
+.goalbar { height: 10px; background: rgba(0,0,0,.25); border-radius: 99px; overflow: hidden; }
+.goalbar-fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--good), #7be0a3); transition: width .5s ease; }
+
+.mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+.mode-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px 12px; text-align: center; cursor: pointer; color: var(--text); transition: transform .1s, border-color .2s;
+}
+.mode-card.primary { background: linear-gradient(160deg, var(--accent), var(--accent-2)); border-color: transparent; }
+.mode-card:active { transform: scale(.97); }
+.mode-ico { font-size: 30px; }
+.mode-name { font-weight: 700; margin-top: 6px; }
+.mode-desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.mode-card.primary .mode-desc { color: rgba(255,255,255,.85); }
+
+.home-foot { display: flex; gap: 12px; }
+.ghost-btn {
+  flex: 1; background: var(--surface); border: 1px solid var(--border); color: var(--text);
+  border-radius: 14px; padding: 12px; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.ghost-btn:active { transform: scale(.97); }

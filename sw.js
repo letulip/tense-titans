@@ -2,19 +2,12 @@
    IMPORTANT: bump CACHE on every release so updated files reach the device.
    This only manages the code cache; it never touches localStorage (progress
    lives there and survives every update). */
-const CACHE = 'tensetitans-v1.8.18';
+const CACHE = 'tensetitans-v1.8.20';
 const ASSETS = [
   './',
   './index.html',
-  './style.css',
-  './app.js',
-  './src/core/leveling.js',
-  './src/core/matching.js',
-  './src/core/srs.js',
-  './src/core/store-migrate.js',
-  './src/core/selection.js',
-  './src/core/achievements.js',
-  './src/core/cosmetics.js',
+  './dist/style.min.css',
+  './dist/app.min.js',
   './verbs.json',
   './examples.json',
   './translations.json',
